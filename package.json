@@ -1,0 +1,12 @@
+{
+  "name": "electron-shell",
+  "version": "1.0.0",
+  "description": "An Electron shell project with a transparent window",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron --inspect ."
+  },
+  "dependencies": {
+    "electron": "^25.0.0"
+  }
+}
