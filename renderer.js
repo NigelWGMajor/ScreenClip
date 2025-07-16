@@ -7,6 +7,21 @@ const { ipcRenderer } = require('electron');
 let currentOpacity = 0.15;
 let currentScaleFactor = 1; // Track DPI scale factor
 
+// Track current image scale for zoom functionality
+let currentImageScale = 1.0;
+let originalImageWidth = 0;
+let originalImageHeight = 0;
+let originalPositionX = 0;
+let originalPositionY = 0;
+
+// Track window scaling
+let currentWindowScale = 1.0;
+const baseWindowWidth = 1200;
+const baseWindowHeight = 800;
+
+// Track original window state for reset functionality
+let originalWindowBounds = null;
+
 // Set initial opacity when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
   const body = document.querySelector('body');
@@ -33,23 +48,215 @@ ipcRenderer.on('toggle-border', () => {
   }
 });
 
-// Mouse wheel event to adjust opacity
+ipcRenderer.on('reset-scale', () => {
+  console.log('Reset scale event received in renderer');
+  const body = document.querySelector('body');
+  const backgroundImage = getComputedStyle(body).backgroundImage;
+  
+  if (backgroundImage && backgroundImage !== 'none' && originalImageWidth > 0) {
+    // Reset image scale to 1:1
+    currentImageScale = 1.0;
+    
+    // Reset window scale to 1:1
+    currentWindowScale = 1.0;
+    
+    // Apply original image dimensions
+    body.style.backgroundSize = `${originalImageWidth}px ${originalImageHeight}px`;
+    
+    // Reset position to initial screenshot alignment
+    body.style.backgroundPosition = `${originalPositionX}px ${originalPositionY}px`;
+    
+    // Update tracking variables
+    imageOffset = { x: originalPositionX, y: originalPositionY };
+    
+    // Reset window to original size and position (if we have them)
+    if (originalWindowBounds) {
+      ipcRenderer.invoke('set-window-bounds', {
+        x: originalWindowBounds.x,
+        y: originalWindowBounds.y,
+        width: originalWindowBounds.width,
+        height: originalWindowBounds.height
+      });
+    } else {
+      // Fallback to base size if no original bounds available
+      ipcRenderer.invoke('get-window-bounds').then(currentBounds => {
+        const newWidth = baseWindowWidth;
+        const newHeight = baseWindowHeight;
+        
+        // Calculate new position to keep window centered on its current center
+        const currentCenterX = currentBounds.x + currentBounds.width / 2;
+        const currentCenterY = currentBounds.y + currentBounds.height / 2;
+        const newX = currentCenterX - newWidth / 2;
+        const newY = currentCenterY - newHeight / 2;
+        
+        ipcRenderer.invoke('set-window-bounds', {
+          x: Math.floor(newX),
+          y: Math.floor(newY),
+          width: newWidth,
+          height: newHeight
+        });
+      });
+    }
+    
+    console.log(`Image and window reset to original state (${originalImageWidth}x${originalImageHeight}) at position (${originalPositionX}, ${originalPositionY})`);
+    if (originalWindowBounds) {
+      console.log(`Window reset to original bounds: ${originalWindowBounds.width}x${originalWindowBounds.height} at (${originalWindowBounds.x}, ${originalWindowBounds.y})`);
+    }
+  } else {
+    console.log('No background image to reset');
+  }
+});
+
+// Menu-triggered copy event
+ipcRenderer.on('menu-copy', async () => {
+  console.log('Menu copy event received in renderer');
+  // Trigger the same copy functionality as Ctrl+C
+  const event = new KeyboardEvent('keydown', {
+    key: 'c',
+    ctrlKey: true,
+    bubbles: true
+  });
+  document.dispatchEvent(event);
+});
+
+// Menu-triggered paste event
+ipcRenderer.on('menu-paste', async () => {
+  console.log('Menu paste event received in renderer');
+  // Trigger the same paste functionality as Ctrl+V
+  const event = new KeyboardEvent('keydown', {
+    key: 'v',
+    ctrlKey: true,
+    bubbles: true
+  });
+  document.dispatchEvent(event);
+});
+
+// Mouse wheel event to adjust opacity, image scale, or window scale
 document.addEventListener('wheel', (event) => {
-  console.log('Mouse wheel event detected, deltaY:', event.deltaY);
+  console.log('Mouse wheel event detected, deltaY:', event.deltaY, 'ctrlKey:', event.ctrlKey, 'shiftKey:', event.shiftKey);
   event.preventDefault(); // Prevent default scroll behavior
   
   const body = document.querySelector('body');
-  const delta = event.deltaY > 0 ? -0.05 : 0.05; // Scroll down decreases opacity, up increases
   
-  currentOpacity += delta;
+  if (event.shiftKey) {
+    // Shift+Wheel: Scale entire window around mouse position
+    const scaleDelta = event.deltaY > 0 ? -0.1 : 0.1; // Scroll down decreases scale, up increases
+    const newWindowScale = Math.max(0.3, Math.min(3.0, currentWindowScale + scaleDelta));
+    
+    if (newWindowScale !== currentWindowScale) {
+      // Get mouse position relative to screen
+      const mouseScreenX = event.screenX;
+      const mouseScreenY = event.screenY;
+      
+      // Calculate new window dimensions
+      const newWidth = Math.floor(baseWindowWidth * newWindowScale);
+      const newHeight = Math.floor(baseWindowHeight * newWindowScale);
+      
+      // Get current window position
+      ipcRenderer.invoke('get-window-bounds').then(windowBounds => {
+        // Calculate mouse position relative to current window
+        const mouseRelativeX = mouseScreenX - windowBounds.x;
+        const mouseRelativeY = mouseScreenY - windowBounds.y;
+        
+        // Calculate the same relative position in the new scaled window
+        const scaleRatio = newWindowScale / currentWindowScale;
+        const newMouseRelativeX = mouseRelativeX * scaleRatio;
+        const newMouseRelativeY = mouseRelativeY * scaleRatio;
+        
+        // Calculate new window position to keep mouse point stationary
+        const newWindowX = mouseScreenX - newMouseRelativeX;
+        const newWindowY = mouseScreenY - newMouseRelativeY;
+        
+        // Update window scale tracking
+        currentWindowScale = newWindowScale;
+        
+        // Scale the background image proportionally if it exists
+        if (originalImageWidth > 0) {
+          const scaledImageWidth = originalImageWidth * newWindowScale;
+          const scaledImageHeight = originalImageHeight * newWindowScale;
+          body.style.backgroundSize = `${scaledImageWidth}px ${scaledImageHeight}px`;
+          
+          // Scale the background position proportionally
+          const scaledPositionX = originalPositionX * newWindowScale;
+          const scaledPositionY = originalPositionY * newWindowScale;
+          body.style.backgroundPosition = `${scaledPositionX}px ${scaledPositionY}px`;
+          
+          // Update image offset tracking
+          imageOffset = { x: scaledPositionX, y: scaledPositionY };
+        }
+        
+        // Apply new window bounds
+        ipcRenderer.invoke('set-window-bounds', {
+          x: Math.floor(newWindowX),
+          y: Math.floor(newWindowY),
+          width: newWidth,
+          height: newHeight
+        });
+        
+        console.log(`Window scale adjusted to: ${currentWindowScale.toFixed(1)}x (${newWidth}x${newHeight})`);
+      });
+    }
+  } else if (event.ctrlKey) {
+    // Ctrl+Wheel: Adjust image scale centered on mouse position
+    const scaleDelta = event.deltaY > 0 ? -0.1 : 0.1; // Scroll down decreases scale, up increases
+    const newScale = Math.max(0.1, Math.min(3.0, currentImageScale + scaleDelta));
+    
+    // Check if we have a background image to scale
+    const backgroundImage = getComputedStyle(body).backgroundImage;
+    if (backgroundImage && backgroundImage !== 'none' && originalImageWidth > 0 && newScale !== currentImageScale) {
+      
+      // Get current background position
+      const currentPosition = getComputedStyle(body).backgroundPosition;
+      const positionParts = currentPosition.split(' ');
+      const currentX = parseFloat(positionParts[0]) || 0;
+      const currentY = parseFloat(positionParts[1]) || 0;
+      
+      // Calculate mouse position relative to the element
+      const rect = body.getBoundingClientRect();
+      const mouseX = event.clientX - rect.left;
+      const mouseY = event.clientY - rect.top;
+      
+      // Calculate the point on the image that's under the mouse cursor
+      const imagePointX = mouseX - currentX;
+      const imagePointY = mouseY - currentY;
+      
+      // Calculate scale factor change
+      const scaleRatio = newScale / currentImageScale;
+      
+      // Apply new scale to original dimensions
+      const newWidth = originalImageWidth * newScale;
+      const newHeight = originalImageHeight * newScale;
+      
+      // Calculate new background position to keep the same point under the mouse
+      const newImagePointX = imagePointX * scaleRatio;
+      const newImagePointY = imagePointY * scaleRatio;
+      const newX = mouseX - newImagePointX;
+      const newY = mouseY - newImagePointY;
+      
+      // Update the background
+      body.style.backgroundSize = `${newWidth}px ${newHeight}px`;
+      body.style.backgroundPosition = `${newX}px ${newY}px`;
+      
+      // Update tracking variables
+      currentImageScale = newScale;
+      imageOffset = { x: newX, y: newY };
+      
+      console.log(`Image scale adjusted to: ${currentImageScale.toFixed(1)}x (${newWidth.toFixed(0)}x${newHeight.toFixed(0)}) centered on mouse`);
+    }
+  } else {
+    // Normal wheel: Adjust opacity
+    const delta = event.deltaY > 0 ? -0.05 : 0.05; // Scroll down decreases opacity, up increases
+    
+    currentOpacity += delta;
 
-  // Clamp opacity between 0.05 and 0.95
-  currentOpacity = Math.max(0.05, Math.min(0.95, currentOpacity));
-  
-  // Apply opacity to the entire body (affects both background color and background image)
-  body.style.opacity = currentOpacity;
-  
-  console.log(`Opacity adjusted to: ${currentOpacity.toFixed(2)}`);
+    // Clamp opacity between 0.05 and 0.95
+    currentOpacity = Math.max(0.05, Math.min(0.95, currentOpacity));
+    
+    // Apply opacity to the entire body (affects both background color and background image)
+    body.style.opacity = currentOpacity;
+    
+    console.log(`Opacity adjusted to: ${currentOpacity.toFixed(2)}`);
+  }
 });
 
 // Double-click event to capture screenshot
@@ -80,6 +287,11 @@ document.addEventListener('dblclick', async (event) => {
       const actualScreenHeight = cropInfo.screenshotSize.height / scaleFactor;
       body.style.backgroundSize = `${actualScreenWidth}px ${actualScreenHeight}px`;
       
+      // Store original dimensions for scaling
+      originalImageWidth = actualScreenWidth;
+      originalImageHeight = actualScreenHeight;
+      currentImageScale = 1.0; // Reset scale to 1:1
+      
       // Position the image so the window area appears centered initially
       // Apply a manual 2px compensation to counteract the consistent offset (move up and left)
       const initialX = -Math.floor(cropInfo.windowX / scaleFactor) - 2;
@@ -87,17 +299,33 @@ document.addEventListener('dblclick', async (event) => {
       
       body.style.backgroundPosition = `${initialX}px ${initialY}px`;
       
+      // Store original position for reset functionality
+      originalPositionX = initialX;
+      originalPositionY = initialY;
+      
       // Reset and set image offset to the initial position
       imageOffset = { x: initialX, y: initialY };
       
       // Store scale factor for future drag calculations
       currentScaleFactor = scaleFactor;
       
+      // Store original window bounds from screenshot capture for reset functionality
+      if (cropInfo.originalWindowBounds) {
+        originalWindowBounds = cropInfo.originalWindowBounds;
+        console.log('Stored original window bounds from screenshot:', originalWindowBounds);
+      } else {
+        // Fallback: capture current window bounds
+        originalWindowBounds = await ipcRenderer.invoke('get-window-bounds');
+        console.log('Fallback: captured current window bounds:', originalWindowBounds);
+      }
+      currentWindowScale = 1.0; // Reset window scale tracking
+      
       console.log(`Screenshot applied successfully!`);
       console.log(`- Scale factor: ${scaleFactor}`);
       console.log(`- Image size: ${actualScreenWidth}x${actualScreenHeight}px`);
       console.log(`- Initial position: ${initialX}, ${initialY}`);
       console.log(`- Screenshot size: ${cropInfo.screenshotSize.width}x${cropInfo.screenshotSize.height}`);
+      console.log(`- Original window bounds:`, originalWindowBounds);
       
       // Test if the background image was actually set
       const appliedBg = getComputedStyle(body).backgroundImage;
@@ -214,4 +442,146 @@ document.addEventListener('contextmenu', (event) => {
     event.preventDefault(); // Only prevent if we actually dragged
   }
   // Otherwise, allow normal context menu
+});
+
+// Keyboard event handler for Ctrl+C (copy) and Ctrl+V (paste) functionality
+document.addEventListener('keydown', async (event) => {
+  // Check for Ctrl+C (copy current view to clipboard)
+  if (event.ctrlKey && event.key.toLowerCase() === 'c') {
+    event.preventDefault(); // Prevent default copy behavior
+    
+    console.log('Ctrl+C detected, copying current window view to clipboard...');
+    
+    try {
+      // Temporarily set opacity to 1 for the capture
+      const body = document.querySelector('body');
+      const originalOpacity = body.style.opacity;
+      body.style.opacity = '1';
+      
+      // Wait a moment for the opacity change to take effect
+      await new Promise(resolve => setTimeout(resolve, 50));
+      
+      // Capture current window view to clipboard
+      const success = await ipcRenderer.invoke('copy-to-clipboard');
+      
+      // Restore original opacity
+      body.style.opacity = originalOpacity;
+      
+      if (success) {
+        console.log('Current window view successfully copied to clipboard!');
+      } else {
+        console.error('Failed to copy window view to clipboard');
+      }
+    } catch (error) {
+      console.error('Error copying to clipboard:', error);
+      
+      // Restore opacity even if there was an error
+      const body = document.querySelector('body');
+      body.style.opacity = currentOpacity;
+    }
+  }
+  // Check for Ctrl+V (paste image from clipboard)
+  else if (event.ctrlKey && event.key.toLowerCase() === 'v') {
+    event.preventDefault(); // Prevent default paste behavior
+    
+    console.log('Ctrl+V detected, pasting image from clipboard...');
+    
+    try {
+      // Request image from clipboard
+      const clipboardData = await ipcRenderer.invoke('paste-from-clipboard');
+      
+      if (clipboardData) {
+        console.log('Image pasted from clipboard successfully');
+        console.log(`Image size: ${clipboardData.logicalWidth}x${clipboardData.logicalHeight}px`);
+        console.log(`Scale factor: ${clipboardData.scaleFactor || 'unknown'}`);
+        
+        // Apply the pasted image as background
+        const body = document.querySelector('body');
+        body.style.backgroundImage = `url(${clipboardData.dataUrl})`;
+        body.style.backgroundRepeat = 'no-repeat';
+        
+        // Automatically turn off border and set opacity to 100% when pasting
+        body.style.borderColor = 'transparent';
+        body.style.opacity = '1';
+        currentOpacity = 1.0;
+        console.log('Border turned off and opacity set to 100% for pasted image');
+        
+        // Use the logical dimensions which should be DPI-adjusted
+        originalImageWidth = clipboardData.logicalWidth;
+        originalImageHeight = clipboardData.logicalHeight;
+        currentImageScale = 1.0; // Reset scale to 1:1
+        
+        console.log(`Setting background to logical size: ${originalImageWidth}x${originalImageHeight}px`);
+        
+        // Set background size to logical image dimensions
+        body.style.backgroundSize = `${originalImageWidth}px ${originalImageHeight}px`;
+        
+        // Resize window to match image dimensions exactly (no border needed since it's transparent)
+        try {
+          const currentBounds = await ipcRenderer.invoke('get-window-bounds');
+          
+          // Since the border is transparent when pasting, size window exactly to image dimensions
+          const newBounds = {
+            x: currentBounds.x,
+            y: currentBounds.y,
+            width: originalImageWidth,   // Exact image width - no border
+            height: originalImageHeight  // Exact image height - no border
+          };
+          
+          console.log(`Resizing window to match image exactly: ${newBounds.width}x${newBounds.height}px`);
+          
+          await ipcRenderer.invoke('set-window-bounds', newBounds);
+          
+          // Position the image at (0,0) since there's no visible border
+          const initialX = 0;
+          const initialY = 0;
+          
+          console.log(`Positioning image at: ${initialX}px, ${initialY}px (no border, perfect fit)`);
+          
+          body.style.backgroundPosition = `${initialX}px ${initialY}px`;
+          
+          // Store original position for reset functionality
+          originalPositionX = initialX;
+          originalPositionY = initialY;
+          
+          // Reset image offset to the initial position
+          imageOffset = { x: initialX, y: initialY };
+          
+          // Store the new window bounds as original for reset functionality
+          originalWindowBounds = newBounds;
+          currentWindowScale = 1.0; // Reset window scale tracking
+          
+          console.log(`Window resized to match pasted image perfectly:`);
+          console.log(`  Image: ${originalImageWidth}x${originalImageHeight}px`);
+          console.log(`  Window: ${newBounds.width}x${newBounds.height}px (exact match - no border)`);
+          console.log(`  Image positioned at: (${initialX}, ${initialY}) - perfect alignment`);
+          
+        } catch (error) {
+          console.error('Failed to resize window:', error);
+          
+          // Fallback: center in current window if resizing fails
+          const currentBounds = await ipcRenderer.invoke('get-window-bounds');
+          
+          const initialX = Math.round((currentBounds.width - originalImageWidth) / 2);
+          const initialY = Math.round((currentBounds.height - originalImageHeight) / 2);
+          
+          body.style.backgroundPosition = `${initialX}px ${initialY}px`;
+          originalPositionX = initialX;
+          originalPositionY = initialY;
+          imageOffset = { x: initialX, y: initialY };
+          
+          // Store current bounds if resize fails
+          originalWindowBounds = currentBounds;
+          currentWindowScale = 1.0;
+        }
+        
+        console.log('Image pasted and positioned successfully');
+        
+      } else {
+        console.log('No image found in clipboard');
+      }
+    } catch (error) {
+      console.error('Error pasting from clipboard:', error);
+    }
+  }
 });

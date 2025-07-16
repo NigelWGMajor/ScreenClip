@@ -277,8 +277,8 @@ ipcMain.handle('copy-to-clipboard', async () => {
     return {
       success: true,
       scaleFactor: scaleFactor,
-      logicalWidth: captureArea.width,
-      logicalHeight: captureArea.height,
+      logicalWidth: captureArea.width,  // This is the actual content size (without border)
+      logicalHeight: captureArea.height, // This is the actual content size (without border)
       capturedWidth: imageSize.width,
       capturedHeight: imageSize.height
     };
