@@ -1,5 +1,6 @@
-const { app, BrowserWindow, Menu, ipcMain, screen, nativeImage, desktopCapturer, clipboard } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, screen, nativeImage, desktopCapturer, clipboard, dialog } = require('electron');
 const path = require('path');
+const fs = require('fs');
 
 let mainWindow;
 
@@ -30,6 +31,19 @@ function createWindow() {
       label: 'Paste (Ctrl+V)',
       click: () => {
         mainWindow.webContents.send('menu-paste');
+      }
+    },
+    { type: 'separator' },
+    {
+      label: 'Load Image from File...',
+      click: () => {
+        mainWindow.webContents.send('menu-load-file');
+      }
+    },
+    {
+      label: 'Save Image to File...',
+      click: () => {
+        mainWindow.webContents.send('menu-save-file');
       }
     },
     { type: 'separator' },
@@ -346,6 +360,103 @@ ipcMain.handle('paste-from-clipboard', async () => {
   } catch (error) {
     console.error('Failed to paste from clipboard:', error);
     return null;
+  }
+});
+
+// IPC handler for loading image from file
+ipcMain.handle('load-image-file', async () => {
+  try {
+    const result = await dialog.showOpenDialog(mainWindow, {
+      title: 'Load Image File',
+      filters: [
+        { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'] },
+        { name: 'PNG Files', extensions: ['png'] },
+        { name: 'JPEG Files', extensions: ['jpg', 'jpeg'] },
+        { name: 'All Files', extensions: ['*'] }
+      ],
+      properties: ['openFile']
+    });
+
+    if (!result.canceled && result.filePaths.length > 0) {
+      const filePath = result.filePaths[0];
+      console.log(`Loading image from: ${filePath}`);
+      
+      // Read the file and convert to data URL
+      const imageBuffer = fs.readFileSync(filePath);
+      const image = nativeImage.createFromBuffer(imageBuffer);
+      const imageSize = image.getSize();
+      const dataUrl = image.toDataURL();
+      
+      console.log(`Loaded image: ${imageSize.width}x${imageSize.height}px`);
+      
+      return {
+        success: true,
+        dataUrl: dataUrl,
+        logicalWidth: imageSize.width,
+        logicalHeight: imageSize.height,
+        fileName: path.basename(filePath)
+      };
+    } else {
+      console.log('User cancelled file selection');
+      return { success: false, cancelled: true };
+    }
+  } catch (error) {
+    console.error('Failed to load image file:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// IPC handler for saving current view to file
+ipcMain.handle('save-image-file', async () => {
+  try {
+    const result = await dialog.showSaveDialog(mainWindow, {
+      title: 'Save Image File',
+      defaultPath: 'screenshot.png',
+      filters: [
+        { name: 'PNG Files', extensions: ['png'] },
+        { name: 'JPEG Files', extensions: ['jpg'] },
+        { name: 'All Files', extensions: ['*'] }
+      ]
+    });
+
+    if (!result.canceled && result.filePath) {
+      const filePath = result.filePath;
+      console.log(`Saving image to: ${filePath}`);
+      
+      // Get current window bounds for capturing
+      const bounds = mainWindow.getBounds();
+      
+      // Get the current display to get scale factor
+      const windowCenterX = bounds.x + bounds.width / 2;
+      const windowCenterY = bounds.y + bounds.height / 2;
+      const currentDisplay = screen.getDisplayNearestPoint({ x: windowCenterX, y: windowCenterY });
+      const scaleFactor = currentDisplay.scaleFactor;
+      
+      // Capture the current window contents (full window for save)
+      const image = await mainWindow.capturePage();
+      const imageSize = image.getSize();
+      
+      // Write to file
+      const imageBuffer = image.toPNG();
+      fs.writeFileSync(filePath, imageBuffer);
+      
+      console.log(`Image saved successfully: ${imageSize.width}x${imageSize.height}px`);
+      console.log(`File: ${filePath}`);
+      
+      return {
+        success: true,
+        filePath: filePath,
+        fileName: path.basename(filePath),
+        imageWidth: imageSize.width,
+        imageHeight: imageSize.height
+      };
+    } else {
+      console.log('User cancelled save operation');
+      return { success: false, cancelled: true };
+    }
+  } catch (error) {
+    console.error('Failed to save image file:', error);
+    return { success: false, error: error.message };
   }
 });
 
