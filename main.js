@@ -659,6 +659,68 @@ ipcMain.handle('get-custom-tolerance', async () => {
   }
 });
 
+// IPC handler for showing help dialog
+ipcMain.handle('show-help-dialog', async () => {
+  try {
+    const result = await dialog.showMessageBox(mainWindow, {
+      type: 'info',
+      title: 'ScreenClip Help',
+      message: 'ScreenClip - Advanced Screenshot Tool',
+      detail: `FEATURES:
+• Screenshot Capture: Takes screenshots excluding the window
+• Multi-Monitor Support: Works across different displays with proper DPI scaling
+• Image Editing: Load, save, copy, and paste images
+• Scaling & Positioning: Zoom and move images with mouse controls
+• Crop to View: Resize window to fit visible image content
+• Transparentize Color: Remove backgrounds by clicking on colors
+• Drag & Drop: Drop image files directly onto the window
+
+CONTROLS:
+• Mouse Wheel: Adjust window opacity (0-100%)
+• Ctrl + Mouse Wheel: Scale image content (10%-500%)
+• Shift + Mouse Wheel: Scale entire window (30%-500%)
+• Left Click + Drag: Move the window
+• Middle Click + Drag: Pan/move image within window
+• Right Click: Open context menu with all features
+
+CONTEXT MENU:
+• Copy/Paste: Clipboard operations with DPI awareness
+• Load/Save: File operations for images
+• Toggle Border: Show/hide red window border
+• Reset Image: Return to original size and position
+• Crop to Current View: Fit window to visible image
+• Transparentize Color: Remove backgrounds with tolerance control
+  - Multiple tolerance levels from precise to broad matching
+  - Custom tolerance input for exact control
+
+TRANSPARENTIZE TOLERANCE GUIDE:
+• Low (5): Very precise color matching
+• Medium (15): Good for clean graphics
+• Default (20): General purpose setting
+• High (35): Good for anti-aliased images
+• Very High (50): Broad color matching
+• Custom: Enter any value 0-100
+
+AUTO-CROP FEATURE:
+Window automatically crops to image content after scaling operations
+(debounced to prevent performance issues)
+
+TIPS:
+• Use low tolerance for solid color backgrounds
+• Use high tolerance for gradients or anti-aliased edges
+• The tool preserves exact pixel accuracy across copy-paste cycles
+• All operations work correctly across different DPI displays`,
+      buttons: ['Close'],
+      defaultId: 0
+    });
+    
+    return { success: true };
+  } catch (error) {
+    console.error('Failed to show help dialog:', error);
+    return { success: false, error: error.message };
+  }
+});
+
 app.on('ready', createWindow);
 
 app.on('window-all-closed', () => {
