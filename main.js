@@ -67,14 +67,71 @@ function createWindow() {
     },
     {
       label: 'Transparentize Color',
-      click: () => {
-        const coords = mainWindow.contextMenuCoords;
-        if (coords) {
-          mainWindow.webContents.send('transparentize-color', coords);
+      submenu: [
+        {
+          label: 'Low Tolerance (5)',
+          click: () => {
+            const coords = mainWindow.contextMenuCoords;
+            if (coords) {
+              mainWindow.webContents.send('transparentize-color', { ...coords, tolerance: 5 });
+            }
+          }
+        },
+        {
+          label: 'Medium Tolerance (15)',
+          click: () => {
+            const coords = mainWindow.contextMenuCoords;
+            if (coords) {
+              mainWindow.webContents.send('transparentize-color', { ...coords, tolerance: 15 });
+            }
+          }
+        },
+        {
+          label: 'Default Tolerance (20)',
+          click: () => {
+            const coords = mainWindow.contextMenuCoords;
+            if (coords) {
+              mainWindow.webContents.send('transparentize-color', { ...coords, tolerance: 20 });
+            }
+          }
+        },
+        {
+          label: 'High Tolerance (35)',
+          click: () => {
+            const coords = mainWindow.contextMenuCoords;
+            if (coords) {
+              mainWindow.webContents.send('transparentize-color', { ...coords, tolerance: 35 });
+            }
+          }
+        },
+        {
+          label: 'Very High Tolerance (50)',
+          click: () => {
+            const coords = mainWindow.contextMenuCoords;
+            if (coords) {
+              mainWindow.webContents.send('transparentize-color', { ...coords, tolerance: 50 });
+            }
+          }
+        },
+        { type: 'separator' },
+        {
+          label: 'Custom Tolerance...',
+          click: () => {
+            const coords = mainWindow.contextMenuCoords;
+            if (coords) {
+              mainWindow.webContents.send('transparentize-color-custom', coords);
+            }
+          }
         }
-      }
+      ]
     },
     { type: 'separator' },
+    {
+      label: 'Help',
+      click: () => {
+        mainWindow.webContents.send('show-help');
+      }
+    },
     {
       label: 'Open Dev Tools',
       click: () => {
@@ -571,6 +628,33 @@ ipcMain.handle('transparentize-color', async (event, coords) => {
     };
   } catch (error) {
     console.error('Failed to transparentize color:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// IPC handler for custom tolerance transparentize
+ipcMain.handle('get-custom-tolerance', async () => {
+  try {
+    const { dialog } = require('electron');
+    const result = await dialog.showMessageBox(mainWindow, {
+      type: 'question',
+      title: 'Custom Tolerance',
+      message: 'Enter color tolerance value (0-100):',
+      detail: 'Lower values = exact color match\nHigher values = broader color range',
+      buttons: ['Cancel', 'OK'],
+      defaultId: 1,
+      cancelId: 0,
+      inputText: '20' // Default value
+    });
+    
+    if (result.response === 1) {
+      // For now, we'll use a simple prompt in the renderer
+      return { success: true, showPrompt: true };
+    } else {
+      return { success: false, cancelled: true };
+    }
+  } catch (error) {
+    console.error('Failed to get custom tolerance:', error);
     return { success: false, error: error.message };
   }
 });
