@@ -119,6 +119,110 @@ ipcRenderer.on('menu-copy', async () => {
   document.dispatchEvent(event);
 });
 
+// Menu-triggered load file event
+ipcRenderer.on('menu-load-file', async () => {
+  console.log('Menu load file event received in renderer');
+  
+  try {
+    const result = await ipcRenderer.invoke('load-image-file');
+    
+    if (result.success) {
+      console.log(`Loading image from file: ${result.fileName}`);
+      console.log(`Image size: ${result.logicalWidth}x${result.logicalHeight}px`);
+      
+      // Apply the loaded image as background
+      const body = document.querySelector('body');
+      body.style.backgroundImage = `url(${result.dataUrl})`;
+      body.style.backgroundRepeat = 'no-repeat';
+      
+      // Automatically turn off border and set opacity to 100% when loading
+      body.style.borderColor = 'transparent';
+      body.style.opacity = '1';
+      currentOpacity = 1.0;
+      console.log('Border turned off and opacity set to 100% for loaded image');
+      
+      // Use the loaded image dimensions
+      originalImageWidth = result.logicalWidth;
+      originalImageHeight = result.logicalHeight;
+      currentImageScale = 1.0; // Reset scale to 1:1
+      
+      console.log(`Setting background to loaded image size: ${originalImageWidth}x${originalImageHeight}px`);
+      
+      // Set background size to image dimensions
+      body.style.backgroundSize = `${originalImageWidth}px ${originalImageHeight}px`;
+      
+      // Resize window to match image dimensions exactly (no border needed since it's transparent)
+      try {
+        const currentBounds = await ipcRenderer.invoke('get-window-bounds');
+        
+        // Since the border is transparent when loading, size window exactly to image dimensions
+        const newBounds = {
+          x: currentBounds.x,
+          y: currentBounds.y,
+          width: originalImageWidth,   // Exact image width - no border
+          height: originalImageHeight  // Exact image height - no border
+        };
+        
+        console.log(`Resizing window to match loaded image: ${newBounds.width}x${newBounds.height}px`);
+        
+        await ipcRenderer.invoke('set-window-bounds', newBounds);
+        
+        // Position the image at (0,0) since there's no visible border
+        const initialX = 0;
+        const initialY = 0;
+        
+        console.log(`Positioning loaded image at: ${initialX}px, ${initialY}px (no border, perfect fit)`);
+        
+        body.style.backgroundPosition = `${initialX}px ${initialY}px`;
+        
+        // Store original position for reset functionality
+        originalPositionX = initialX;
+        originalPositionY = initialY;
+        
+        // Reset image offset to the initial position
+        imageOffset = { x: initialX, y: initialY };
+        
+        // Store the new window bounds as original for reset functionality
+        originalWindowBounds = newBounds;
+        currentWindowScale = 1.0; // Reset window scale tracking
+        
+        console.log(`Image loaded successfully from file: ${result.fileName}`);
+        
+      } catch (error) {
+        console.error('Failed to resize window for loaded image:', error);
+      }
+      
+    } else if (result.cancelled) {
+      console.log('File load cancelled by user');
+    } else {
+      console.error('Failed to load image file:', result.error);
+    }
+  } catch (error) {
+    console.error('Error loading image file:', error);
+  }
+});
+
+// Menu-triggered save file event
+ipcRenderer.on('menu-save-file', async () => {
+  console.log('Menu save file event received in renderer');
+  
+  try {
+    const result = await ipcRenderer.invoke('save-image-file');
+    
+    if (result.success) {
+      console.log(`Image saved successfully to: ${result.fileName}`);
+      console.log(`Saved image size: ${result.imageWidth}x${result.imageHeight}px`);
+      console.log(`File path: ${result.filePath}`);
+    } else if (result.cancelled) {
+      console.log('File save cancelled by user');
+    } else {
+      console.error('Failed to save image file:', result.error);
+    }
+  } catch (error) {
+    console.error('Error saving image file:', error);
+  }
+});
+
 // Menu-triggered paste event
 ipcRenderer.on('menu-paste', async () => {
   console.log('Menu paste event received in renderer');
