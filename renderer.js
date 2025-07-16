@@ -22,6 +22,9 @@ const baseWindowHeight = 800;
 // Track original window state for reset functionality
 let originalWindowBounds = null;
 
+// Debounce timer for auto-crop after scaling
+let autoCropTimer = null;
+
 // Set initial opacity when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
   const body = document.querySelector('body');
@@ -353,6 +356,114 @@ ipcRenderer.on('crop-to-view', async () => {
   }
 });
 
+// Menu-triggered transparentize color event
+ipcRenderer.on('transparentize-color', async (event, coords) => {
+  console.log('Transparentize color event received in renderer at:', coords);
+  
+  try {
+    // Get the image data at the clicked coordinates
+    const result = await ipcRenderer.invoke('transparentize-color', coords);
+    
+    if (result.success) {
+      // Create a canvas to process the image
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
+      
+      // Create an image from the captured buffer
+      const img = new Image();
+      img.onload = () => {
+        // Set canvas size to match the captured image
+        canvas.width = img.width;
+        canvas.height = img.height;
+        
+        // Draw the image to canvas
+        ctx.drawImage(img, 0, 0);
+        
+        // Get image data
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imageData.data;
+        
+        // Get the color at the target pixel (with bounds checking)
+        const targetX = Math.max(0, Math.min(result.targetPixel.x, canvas.width - 1));
+        const targetY = Math.max(0, Math.min(result.targetPixel.y, canvas.height - 1));
+        const pixelIndex = (targetY * canvas.width + targetX) * 4;
+        
+        if (pixelIndex >= 0 && pixelIndex < data.length - 3) {
+          const targetR = data[pixelIndex];
+          const targetG = data[pixelIndex + 1];
+          const targetB = data[pixelIndex + 2];
+          
+          console.log(`Target color: RGB(${targetR}, ${targetG}, ${targetB}) at (${targetX}, ${targetY})`);
+          
+          // Color tolerance for matching (adjustable - you can make this configurable later)
+          const tolerance = 20; // Increased for better matching
+          let pixelsTransparentized = 0;
+          
+          // Process all pixels
+          for (let i = 0; i < data.length; i += 4) {
+            const r = data[i];
+            const g = data[i + 1];
+            const b = data[i + 2];
+            
+            // Calculate color difference
+            const colorDiff = Math.sqrt(
+              Math.pow(r - targetR, 2) +
+              Math.pow(g - targetG, 2) +
+              Math.pow(b - targetB, 2)
+            );
+            
+            // If color is within tolerance, make it transparent
+            if (colorDiff <= tolerance) {
+              data[i + 3] = 0; // Set alpha to 0 (transparent)
+              pixelsTransparentized++;
+            }
+          }
+          
+          // Put the modified image data back
+          ctx.putImageData(imageData, 0, 0);
+          
+          // Convert canvas to data URL
+          const processedDataUrl = canvas.toDataURL('image/png');
+          
+          // Update the background image
+          const body = document.querySelector('body');
+          body.style.backgroundImage = `url(${processedDataUrl})`;
+          
+          // Reset scaling and positioning to fit the new image
+          body.style.backgroundSize = `${result.logicalWidth}px ${result.logicalHeight}px`;
+          body.style.backgroundPosition = '2px 2px'; // Account for border
+          body.style.backgroundRepeat = 'no-repeat';
+          
+          // Reset image tracking variables
+          currentImageScale = 1.0;
+          originalImageWidth = result.logicalWidth;
+          originalImageHeight = result.logicalHeight;
+          originalPositionX = 2;
+          originalPositionY = 2;
+          imageOffset = { x: 2, y: 2 };
+          
+          console.log(`Transparentized color RGB(${targetR}, ${targetG}, ${targetB}) with tolerance ${tolerance}`);
+          console.log(`Processed image size: ${result.logicalWidth}x${result.logicalHeight}px`);
+          console.log(`Pixels transparentized: ${pixelsTransparentized} out of ${data.length / 4}`);
+        } else {
+          console.error('Target pixel coordinates out of bounds');
+        }
+      };
+      
+      img.onerror = (error) => {
+        console.error('Failed to load captured image:', error);
+      };
+      
+      // Load the image data
+      img.src = `data:image/png;base64,${result.imageBuffer}`;
+    } else {
+      console.error('Failed to capture image for transparentizing:', result.error);
+    }
+  } catch (error) {
+    console.error('Error transparentizing color:', error);
+  }
+});
+
 // Mouse wheel event to adjust opacity, image scale, or window scale
 document.addEventListener('wheel', (event) => {
   console.log('Mouse wheel event detected, deltaY:', event.deltaY, 'ctrlKey:', event.ctrlKey, 'shiftKey:', event.shiftKey);
@@ -363,25 +474,27 @@ document.addEventListener('wheel', (event) => {
   if (event.shiftKey) {
     // Shift+Wheel: Scale entire window around mouse position
     const scaleDelta = event.deltaY > 0 ? -0.1 : 0.1; // Scroll down decreases scale, up increases
-    const newWindowScale = Math.max(0.3, Math.min(3.0, currentWindowScale + scaleDelta));
+    const newWindowScale = Math.max(0.3, Math.min(5.0, currentWindowScale + scaleDelta));
     
     if (newWindowScale !== currentWindowScale) {
       // Get mouse position relative to screen
       const mouseScreenX = event.screenX;
       const mouseScreenY = event.screenY;
       
-      // Calculate new window dimensions
-      const newWidth = Math.floor(baseWindowWidth * newWindowScale);
-      const newHeight = Math.floor(baseWindowHeight * newWindowScale);
-      
-      // Get current window position
+      // Get current window position first to calculate scaling from current size
       ipcRenderer.invoke('get-window-bounds').then(windowBounds => {
+        // Calculate scale ratio
+        const scaleRatio = newWindowScale / currentWindowScale;
+        
+        // Calculate new window dimensions based on CURRENT window size, not base size
+        const newWidth = Math.floor(windowBounds.width * scaleRatio);
+        const newHeight = Math.floor(windowBounds.height * scaleRatio);
+        
         // Calculate mouse position relative to current window
         const mouseRelativeX = mouseScreenX - windowBounds.x;
         const mouseRelativeY = mouseScreenY - windowBounds.y;
         
         // Calculate the same relative position in the new scaled window
-        const scaleRatio = newWindowScale / currentWindowScale;
         const newMouseRelativeX = mouseRelativeX * scaleRatio;
         const newMouseRelativeY = mouseRelativeY * scaleRatio;
         
@@ -394,13 +507,24 @@ document.addEventListener('wheel', (event) => {
         
         // Scale the background image proportionally if it exists
         if (originalImageWidth > 0) {
-          const scaledImageWidth = originalImageWidth * newWindowScale;
-          const scaledImageHeight = originalImageHeight * newWindowScale;
+          // Calculate the current displayed image size (original * current image scale)
+          const currentDisplayedWidth = originalImageWidth * currentImageScale;
+          const currentDisplayedHeight = originalImageHeight * currentImageScale;
+          
+          // Scale the displayed image size by the window scale
+          const scaledImageWidth = currentDisplayedWidth * newWindowScale;
+          const scaledImageHeight = currentDisplayedHeight * newWindowScale;
           body.style.backgroundSize = `${scaledImageWidth}px ${scaledImageHeight}px`;
           
-          // Scale the background position proportionally
-          const scaledPositionX = originalPositionX * newWindowScale;
-          const scaledPositionY = originalPositionY * newWindowScale;
+          // Get current background position to scale it proportionally
+          const currentPosition = getComputedStyle(body).backgroundPosition;
+          const positionParts = currentPosition.split(' ');
+          const currentX = parseFloat(positionParts[0]) || 0;
+          const currentY = parseFloat(positionParts[1]) || 0;
+          
+          // Scale the current position by the window scale ratio
+          const scaledPositionX = currentX * scaleRatio;
+          const scaledPositionY = currentY * scaleRatio;
           body.style.backgroundPosition = `${scaledPositionX}px ${scaledPositionY}px`;
           
           // Update image offset tracking
@@ -415,13 +539,22 @@ document.addEventListener('wheel', (event) => {
           height: newHeight
         });
         
+        // Debounced auto-crop: only trigger after mouse wheel action has stopped
+        if (autoCropTimer) {
+          clearTimeout(autoCropTimer);
+        }
+        autoCropTimer = setTimeout(() => {
+          triggerCropToCurrentView();
+          autoCropTimer = null;
+        }, 500); // Wait 500ms after last scroll event
+        
         console.log(`Window scale adjusted to: ${currentWindowScale.toFixed(1)}x (${newWidth}x${newHeight})`);
       });
     }
   } else if (event.ctrlKey) {
     // Ctrl+Wheel: Adjust image scale centered on mouse position
     const scaleDelta = event.deltaY > 0 ? -0.1 : 0.1; // Scroll down decreases scale, up increases
-    const newScale = Math.max(0.1, Math.min(3.0, currentImageScale + scaleDelta));
+    const newScale = Math.max(0.1, Math.min(5.0, currentImageScale + scaleDelta));
     
     // Check if we have a background image to scale
     const backgroundImage = getComputedStyle(body).backgroundImage;
@@ -944,3 +1077,99 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 });
+
+// Helper function to trigger crop to current view
+async function triggerCropToCurrentView() {
+  try {
+    const body = document.querySelector('body');
+    const backgroundImage = getComputedStyle(body).backgroundImage;
+    
+    if (backgroundImage && backgroundImage !== 'none') {
+      // Get current window bounds
+      const currentBounds = await ipcRenderer.invoke('get-window-bounds');
+      
+      // Get current background properties
+      const backgroundSize = getComputedStyle(body).backgroundSize;
+      const backgroundPosition = getComputedStyle(body).backgroundPosition;
+      const borderStyle = getComputedStyle(body).borderStyle;
+      const borderWidth = borderStyle === 'solid' ? 2 : 0; // 2px border or transparent
+      
+      // Parse background size
+      const sizeParts = backgroundSize.split(' ');
+      const imageDisplayWidth = parseFloat(sizeParts[0]) || 0;
+      const imageDisplayHeight = parseFloat(sizeParts[1]) || imageDisplayWidth; // Handle single value
+      
+      // Parse background position
+      const positionParts = backgroundPosition.split(' ');
+      const imageOffsetX = parseFloat(positionParts[0]) || 0;
+      const imageOffsetY = parseFloat(positionParts[1]) || 0;
+      
+      // Calculate the visible area of the image within the current window
+      const windowContentWidth = currentBounds.width - (borderWidth * 2);
+      const windowContentHeight = currentBounds.height - (borderWidth * 2);
+      
+      // Find the intersection of the image and the window content area
+      const imageLeft = imageOffsetX;
+      const imageTop = imageOffsetY;
+      const imageRight = imageLeft + imageDisplayWidth;
+      const imageBottom = imageTop + imageDisplayHeight;
+      
+      const viewLeft = borderWidth;
+      const viewTop = borderWidth;
+      const viewRight = viewLeft + windowContentWidth;
+      const viewBottom = viewTop + windowContentHeight;
+      
+      // Calculate intersection bounds
+      const visibleLeft = Math.max(imageLeft, viewLeft);
+      const visibleTop = Math.max(imageTop, viewTop);
+      const visibleRight = Math.min(imageRight, viewRight);
+      const visibleBottom = Math.min(imageBottom, viewBottom);
+      
+      // Calculate visible dimensions
+      const visibleWidth = Math.max(0, visibleRight - visibleLeft);
+      const visibleHeight = Math.max(0, visibleBottom - visibleTop);
+      
+      if (visibleWidth > 0 && visibleHeight > 0) {
+        // Calculate the center of the visible image area relative to the current window
+        const visibleCenterX = visibleLeft + (visibleWidth / 2);
+        const visibleCenterY = visibleTop + (visibleHeight / 2);
+        
+        // Calculate the offset adjustments needed
+        const offsetX = visibleLeft - borderWidth; // How much to move the window
+        const offsetY = visibleTop - borderWidth; // How much to move the window
+        
+        // Calculate new background position after cropping
+        const newBackgroundX = imageOffsetX - visibleLeft + borderWidth;
+        const newBackgroundY = imageOffsetY - visibleTop + borderWidth;
+        
+        // Send crop information to main process
+        const cropInfo = {
+          visibleWidth: visibleWidth, // Don't add border - we want the exact visible image size
+          visibleHeight: visibleHeight, // Don't add border - we want the exact visible image size
+          offsetX: offsetX,
+          offsetY: offsetY,
+          borderWidth: borderWidth,
+          newBackgroundX: newBackgroundX,
+          newBackgroundY: newBackgroundY,
+          visibleCenterX: visibleCenterX, // Center of visible area relative to current window
+          visibleCenterY: visibleCenterY  // Center of visible area relative to current window
+        };
+        
+        // Execute the crop
+        const result = await ipcRenderer.invoke('crop-to-current-view', cropInfo);
+        
+        if (result.success) {
+          // Update the background position to show the cropped area correctly
+          body.style.backgroundPosition = `${newBackgroundX}px ${newBackgroundY}px`;
+          
+          // Update image offset tracking
+          imageOffset = { x: newBackgroundX, y: newBackgroundY };
+          
+          console.log(`Auto-crop after scaling: window cropped to ${result.newBounds.width}x${result.newBounds.height}`);
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Error in auto-crop after scaling:', error);
+  }
+}

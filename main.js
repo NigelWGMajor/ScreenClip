@@ -65,6 +65,15 @@ function createWindow() {
         mainWindow.webContents.send('crop-to-view');
       }
     },
+    {
+      label: 'Transparentize Color',
+      click: () => {
+        const coords = mainWindow.contextMenuCoords;
+        if (coords) {
+          mainWindow.webContents.send('transparentize-color', coords);
+        }
+      }
+    },
     { type: 'separator' },
     {
       label: 'Open Dev Tools',
@@ -80,7 +89,13 @@ function createWindow() {
     }
   ]);
 
-  mainWindow.webContents.on('context-menu', () => {
+  mainWindow.webContents.on('context-menu', (event, params) => {
+    // params contains x, y coordinates relative to the web contents
+    console.log(`Context menu at: (${params.x}, ${params.y})`);
+    
+    // Store the coordinates for use in menu actions
+    mainWindow.contextMenuCoords = { x: params.x, y: params.y };
+    
     contextMenu.popup();
   });
 
@@ -507,6 +522,55 @@ ipcMain.handle('crop-to-current-view', async (event, cropInfo) => {
     };
   } catch (error) {
     console.error('Failed to crop window:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// IPC handler for transparentizing color at coordinates
+ipcMain.handle('transparentize-color', async (event, coords) => {
+  try {
+    console.log(`Transparentizing color at coordinates: (${coords.x}, ${coords.y})`);
+    
+    // Get current window bounds
+    const bounds = mainWindow.getBounds();
+    
+    // Get the current display to get scale factor
+    const windowCenterX = bounds.x + bounds.width / 2;
+    const windowCenterY = bounds.y + bounds.height / 2;
+    const currentDisplay = screen.getDisplayNearestPoint({ x: windowCenterX, y: windowCenterY });
+    const scaleFactor = currentDisplay.scaleFactor;
+    
+    // Capture the current window contents excluding the border
+    const borderWidth = 2;
+    const captureArea = {
+      x: borderWidth,
+      y: borderWidth,
+      width: bounds.width - (borderWidth * 2),
+      height: bounds.height - (borderWidth * 2)
+    };
+    
+    const image = await mainWindow.capturePage(captureArea);
+    const imageBuffer = image.toPNG();
+    
+    // Calculate the pixel coordinates within the captured image
+    // coords are relative to the window, we need to adjust for the border
+    const pixelX = Math.floor((coords.x - borderWidth) * scaleFactor);
+    const pixelY = Math.floor((coords.y - borderWidth) * scaleFactor);
+    
+    console.log(`Capture area: ${captureArea.width}x${captureArea.height} at (${captureArea.x}, ${captureArea.y})`);
+    console.log(`Scale factor: ${scaleFactor}`);
+    console.log(`Pixel coordinates in image: (${pixelX}, ${pixelY})`);
+    
+    return {
+      success: true,
+      imageBuffer: imageBuffer.toString('base64'),
+      targetPixel: { x: pixelX, y: pixelY },
+      scaleFactor: scaleFactor,
+      logicalWidth: captureArea.width,
+      logicalHeight: captureArea.height
+    };
+  } catch (error) {
+    console.error('Failed to transparentize color:', error);
     return { success: false, error: error.message };
   }
 });
