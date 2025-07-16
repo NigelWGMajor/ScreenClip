@@ -27,6 +27,12 @@ function createWindow() {
       }
     },
     {
+      label: 'Reset Image',
+      click: () => {
+        mainWindow.webContents.send('reset-scale');
+      }
+    },
+    {
       label: 'Open Dev Tools',
       click: () => {
         mainWindow.webContents.openDevTools();
