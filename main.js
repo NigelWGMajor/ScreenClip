@@ -193,6 +193,20 @@ ipcMain.handle('do-drag', (event, { x, y, targetWidth, targetHeight }) => {
   });
 });
 
+// IPC handlers for window scaling
+ipcMain.handle('get-window-bounds', () => {
+  return mainWindow.getBounds();
+});
+
+ipcMain.handle('set-window-bounds', (event, { x, y, width, height }) => {
+  mainWindow.setBounds({
+    x: x,
+    y: y,
+    width: width,
+    height: height
+  });
+});
+
 app.on('ready', createWindow);
 
 app.on('window-all-closed', () => {
