@@ -3,9 +3,10 @@ const path = require('path');
 const fs = require('fs');
 
 let mainWindow;
+let windows = []; // Array to track all windows
 
 function createWindow() {
-  mainWindow = new BrowserWindow({
+  const newWindow = new BrowserWindow({
     width: 1200,
     height: 800,
     transparent: true,
@@ -18,51 +19,51 @@ function createWindow() {
     }
   });
 
-  mainWindow.loadFile('index.html');
+  newWindow.loadFile('index.html');
 
   const contextMenu = Menu.buildFromTemplate([
     {
       label: 'Copy (Ctrl+C)',
       click: () => {
-        mainWindow.webContents.send('menu-copy');
+        newWindow.webContents.send('menu-copy');
       }
     },
     {
       label: 'Paste (Ctrl+V)',
       click: () => {
-        mainWindow.webContents.send('menu-paste');
+        newWindow.webContents.send('menu-paste');
       }
     },
     { type: 'separator' },
     {
       label: 'Load Image from File...',
       click: () => {
-        mainWindow.webContents.send('menu-load-file');
+        newWindow.webContents.send('menu-load-file');
       }
     },
     {
       label: 'Save Image to File...',
       click: () => {
-        mainWindow.webContents.send('menu-save-file');
+        newWindow.webContents.send('menu-save-file');
       }
     },
     { type: 'separator' },
     {
       label: 'Toggle Border Visibility',
       click: () => {
-        mainWindow.webContents.send('toggle-border');
+        newWindow.webContents.send('toggle-border');
       }
     },
     {
       label: 'Reset Image',
       click: () => {
-        mainWindow.webContents.send('reset-scale');
+        newWindow.webContents.send('reset-scale');
       }
     },
     {
       label: 'Crop to Current View',
       click: () => {
-        mainWindow.webContents.send('crop-to-view');
+        newWindow.webContents.send('crop-to-view');
       }
     },
     {
@@ -71,45 +72,45 @@ function createWindow() {
         {
           label: 'Low Tolerance (5)',
           click: () => {
-            const coords = mainWindow.contextMenuCoords;
+            const coords = newWindow.contextMenuCoords;
             if (coords) {
-              mainWindow.webContents.send('transparentize-color', { ...coords, tolerance: 5 });
+              newWindow.webContents.send('transparentize-color', { ...coords, tolerance: 5 });
             }
           }
         },
         {
           label: 'Medium Tolerance (15)',
           click: () => {
-            const coords = mainWindow.contextMenuCoords;
+            const coords = newWindow.contextMenuCoords;
             if (coords) {
-              mainWindow.webContents.send('transparentize-color', { ...coords, tolerance: 15 });
+              newWindow.webContents.send('transparentize-color', { ...coords, tolerance: 15 });
             }
           }
         },
         {
           label: 'Default Tolerance (20)',
           click: () => {
-            const coords = mainWindow.contextMenuCoords;
+            const coords = newWindow.contextMenuCoords;
             if (coords) {
-              mainWindow.webContents.send('transparentize-color', { ...coords, tolerance: 20 });
+              newWindow.webContents.send('transparentize-color', { ...coords, tolerance: 20 });
             }
           }
         },
         {
           label: 'High Tolerance (35)',
           click: () => {
-            const coords = mainWindow.contextMenuCoords;
+            const coords = newWindow.contextMenuCoords;
             if (coords) {
-              mainWindow.webContents.send('transparentize-color', { ...coords, tolerance: 35 });
+              newWindow.webContents.send('transparentize-color', { ...coords, tolerance: 35 });
             }
           }
         },
         {
           label: 'Very High Tolerance (50)',
           click: () => {
-            const coords = mainWindow.contextMenuCoords;
+            const coords = newWindow.contextMenuCoords;
             if (coords) {
-              mainWindow.webContents.send('transparentize-color', { ...coords, tolerance: 50 });
+              newWindow.webContents.send('transparentize-color', { ...coords, tolerance: 50 });
             }
           }
         },
@@ -117,9 +118,9 @@ function createWindow() {
         {
           label: 'Custom Tolerance...',
           click: () => {
-            const coords = mainWindow.contextMenuCoords;
+            const coords = newWindow.contextMenuCoords;
             if (coords) {
-              mainWindow.webContents.send('transparentize-color-custom', coords);
+              newWindow.webContents.send('transparentize-color-custom', coords);
             }
           }
         }
@@ -127,49 +128,92 @@ function createWindow() {
     },
     { type: 'separator' },
     {
+      label: 'New Window',
+      click: () => {
+        createWindow();
+      }
+    },
+    {
       label: 'Help',
       click: () => {
-        mainWindow.webContents.send('show-help');
+        newWindow.webContents.send('show-help');
       }
     },
     {
       label: 'Open Dev Tools',
       click: () => {
-        mainWindow.webContents.openDevTools();
+        newWindow.webContents.openDevTools();
       }
     },
     {
       label: 'Close Window',
       click: () => {
-        mainWindow.close();
+        newWindow.close();
+      }
+    },
+    {
+      label: 'Close All Windows',
+      click: () => {
+        // Close all windows
+        const allWindows = [...windows]; // Create a copy to avoid array modification issues
+        allWindows.forEach(window => {
+          if (window && !window.isDestroyed()) {
+            window.close();
+          }
+        });
       }
     }
   ]);
 
-  mainWindow.webContents.on('context-menu', (event, params) => {
+  newWindow.webContents.on('context-menu', (event, params) => {
     // params contains x, y coordinates relative to the web contents
-    console.log(`Context menu at: (${params.x}, ${params.y})`);
+    console.log(`Context menu at: (${params.x}, ${params.y}) on window ${newWindow.id}`);
     
     // Store the coordinates for use in menu actions
-    mainWindow.contextMenuCoords = { x: params.x, y: params.y };
+    newWindow.contextMenuCoords = { x: params.x, y: params.y };
     
     contextMenu.popup();
   });
 
-  mainWindow.once('ready-to-show', () => {
-    mainWindow.show();
+  newWindow.once('ready-to-show', () => {
+    newWindow.show();
   });
 
-  mainWindow.on('closed', () => {
-    mainWindow = null;
+  newWindow.on('closed', () => {
+    // Remove the window from the windows array
+    const index = windows.indexOf(newWindow);
+    if (index > -1) {
+      windows.splice(index, 1);
+    }
+    
+    // If this was the main window, update the reference
+    if (newWindow === mainWindow) {
+      mainWindow = windows.length > 0 ? windows[0] : null;
+    }
   });
+
+  // Add the window to the windows array
+  windows.push(newWindow);
+  
+  // Set as main window if it's the first one
+  if (!mainWindow) {
+    mainWindow = newWindow;
+  }
+  
+  return newWindow;
 }
 
 // IPC handler for screenshot capture
-ipcMain.handle('capture-screenshot', async () => {
+ipcMain.handle('capture-screenshot', async (event) => {
   try {
+    // Get the window that sent this request
+    const senderWindow = BrowserWindow.fromWebContents(event.sender);
+    if (!senderWindow) {
+      throw new Error('Could not find sender window');
+    }
+    
     // Get window bounds before hiding
-    const windowBounds = mainWindow.getBounds();
+    const windowBounds = senderWindow.getBounds();
     
     // Store original window bounds for reset functionality
     const originalWindowBounds = {
@@ -180,7 +224,7 @@ ipcMain.handle('capture-screenshot', async () => {
     };
     
     // Hide the window temporarily
-    mainWindow.hide();
+    senderWindow.hide();
     
     // Wait a bit for the window to hide
     await new Promise(resolve => setTimeout(resolve, 200));
@@ -261,16 +305,18 @@ ipcMain.handle('capture-screenshot', async () => {
       console.log(`Crop info: ${cropInfo.windowX},${cropInfo.windowY} ${cropInfo.windowWidth}x${cropInfo.windowHeight}`);
       
       // Show the window again
-      mainWindow.show();
+      senderWindow.show();
       
       return cropInfo;
     } else {
-      mainWindow.show();
+      senderWindow.show();
       throw new Error('No screen sources found');
     }
   } catch (error) {
     console.error('Screenshot capture failed:', error);
-    mainWindow.show();
+    if (senderWindow && !senderWindow.isDestroyed()) {
+      senderWindow.show();
+    }
     return null;
   }
 });
@@ -286,7 +332,12 @@ ipcMain.handle('get-display-info', () => {
 
 // IPC handlers for window dragging with size preservation
 ipcMain.handle('start-drag', (event, { mouseX, mouseY }) => {
-  const windowBounds = mainWindow.getBounds();
+  const senderWindow = BrowserWindow.fromWebContents(event.sender);
+  if (!senderWindow) {
+    throw new Error('Could not find sender window');
+  }
+  
+  const windowBounds = senderWindow.getBounds();
   
   return {
     windowX: windowBounds.x,
@@ -299,8 +350,13 @@ ipcMain.handle('start-drag', (event, { mouseX, mouseY }) => {
 });
 
 ipcMain.handle('do-drag', (event, { x, y, targetWidth, targetHeight }) => {
+  const senderWindow = BrowserWindow.fromWebContents(event.sender);
+  if (!senderWindow) {
+    throw new Error('Could not find sender window');
+  }
+  
   // Set both position and size to prevent window from growing
-  mainWindow.setBounds({
+  senderWindow.setBounds({
     x: x,
     y: y,
     width: targetWidth,
@@ -309,12 +365,21 @@ ipcMain.handle('do-drag', (event, { x, y, targetWidth, targetHeight }) => {
 });
 
 // IPC handlers for window scaling
-ipcMain.handle('get-window-bounds', () => {
-  return mainWindow.getBounds();
+ipcMain.handle('get-window-bounds', (event) => {
+  const senderWindow = BrowserWindow.fromWebContents(event.sender);
+  if (!senderWindow) {
+    throw new Error('Could not find sender window');
+  }
+  return senderWindow.getBounds();
 });
 
 ipcMain.handle('set-window-bounds', (event, { x, y, width, height }) => {
-  mainWindow.setBounds({
+  const senderWindow = BrowserWindow.fromWebContents(event.sender);
+  if (!senderWindow) {
+    throw new Error('Could not find sender window');
+  }
+  
+  senderWindow.setBounds({
     x: x,
     y: y,
     width: width,
@@ -323,10 +388,15 @@ ipcMain.handle('set-window-bounds', (event, { x, y, width, height }) => {
 });
 
 // IPC handler for copying current window view to clipboard
-ipcMain.handle('copy-to-clipboard', async () => {
+ipcMain.handle('copy-to-clipboard', async (event) => {
   try {
+    const senderWindow = BrowserWindow.fromWebContents(event.sender);
+    if (!senderWindow) {
+      throw new Error('Could not find sender window');
+    }
+    
     // Get current window bounds
-    const bounds = mainWindow.getBounds();
+    const bounds = senderWindow.getBounds();
     
     // Get the current display to get scale factor
     const windowCenterX = bounds.x + bounds.width / 2;
@@ -349,7 +419,7 @@ ipcMain.handle('copy-to-clipboard', async () => {
     captureArea.width = Math.floor(captureArea.width);
     captureArea.height = Math.floor(captureArea.height);
     
-    const image = await mainWindow.capturePage(captureArea);
+    const image = await senderWindow.capturePage(captureArea);
     const imageSize = image.getSize();
     
     // If there's a size mismatch due to DPI scaling, we need to be aware of it
@@ -442,9 +512,14 @@ ipcMain.handle('paste-from-clipboard', async () => {
 });
 
 // IPC handler for loading image from file
-ipcMain.handle('load-image-file', async () => {
+ipcMain.handle('load-image-file', async (event) => {
   try {
-    const result = await dialog.showOpenDialog(mainWindow, {
+    const senderWindow = BrowserWindow.fromWebContents(event.sender);
+    if (!senderWindow) {
+      throw new Error('Could not find sender window');
+    }
+    
+    const result = await dialog.showOpenDialog(senderWindow, {
       title: 'Load Image File',
       filters: [
         { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'] },
@@ -485,9 +560,14 @@ ipcMain.handle('load-image-file', async () => {
 });
 
 // IPC handler for saving current view to file
-ipcMain.handle('save-image-file', async () => {
+ipcMain.handle('save-image-file', async (event) => {
   try {
-    const result = await dialog.showSaveDialog(mainWindow, {
+    const senderWindow = BrowserWindow.fromWebContents(event.sender);
+    if (!senderWindow) {
+      throw new Error('Could not find sender window');
+    }
+    
+    const result = await dialog.showSaveDialog(senderWindow, {
       title: 'Save Image File',
       defaultPath: 'screenshot.png',
       filters: [
@@ -502,7 +582,7 @@ ipcMain.handle('save-image-file', async () => {
       console.log(`Saving image to: ${filePath}`);
       
       // Get current window bounds for capturing
-      const bounds = mainWindow.getBounds();
+      const bounds = senderWindow.getBounds();
       
       // Get the current display to get scale factor
       const windowCenterX = bounds.x + bounds.width / 2;
@@ -511,7 +591,7 @@ ipcMain.handle('save-image-file', async () => {
       const scaleFactor = currentDisplay.scaleFactor;
       
       // Capture the current window contents (full window for save)
-      const image = await mainWindow.capturePage();
+      const image = await senderWindow.capturePage();
       const imageSize = image.getSize();
       
       // Write to file
@@ -541,10 +621,15 @@ ipcMain.handle('save-image-file', async () => {
 // IPC handler for cropping window to current view
 ipcMain.handle('crop-to-current-view', async (event, cropInfo) => {
   try {
+    const senderWindow = BrowserWindow.fromWebContents(event.sender);
+    if (!senderWindow) {
+      throw new Error('Could not find sender window');
+    }
+    
     console.log('Cropping window to current view:', cropInfo);
     
     // Get current window bounds
-    const currentBounds = mainWindow.getBounds();
+    const currentBounds = senderWindow.getBounds();
     
     // Calculate the new window size
     // cropInfo contains: visibleWidth, visibleHeight, offsetX, offsetY, borderWidth, visibleCenterX, visibleCenterY
@@ -566,7 +651,7 @@ ipcMain.handle('crop-to-current-view', async (event, cropInfo) => {
     console.log(`Crop offset: (${cropInfo.offsetX}, ${cropInfo.offsetY}), border: ${cropInfo.borderWidth}px`);
     
     // Set the new window bounds
-    mainWindow.setBounds({
+    senderWindow.setBounds({
       x: Math.round(newX),
       y: Math.round(newY),
       width: newWidth,
@@ -586,10 +671,15 @@ ipcMain.handle('crop-to-current-view', async (event, cropInfo) => {
 // IPC handler for transparentizing color at coordinates
 ipcMain.handle('transparentize-color', async (event, coords) => {
   try {
+    const senderWindow = BrowserWindow.fromWebContents(event.sender);
+    if (!senderWindow) {
+      throw new Error('Could not find sender window');
+    }
+    
     console.log(`Transparentizing color at coordinates: (${coords.x}, ${coords.y})`);
     
     // Get current window bounds
-    const bounds = mainWindow.getBounds();
+    const bounds = senderWindow.getBounds();
     
     // Get the current display to get scale factor
     const windowCenterX = bounds.x + bounds.width / 2;
@@ -606,7 +696,7 @@ ipcMain.handle('transparentize-color', async (event, coords) => {
       height: bounds.height - (borderWidth * 2)
     };
     
-    const image = await mainWindow.capturePage(captureArea);
+    const image = await senderWindow.capturePage(captureArea);
     const imageBuffer = image.toPNG();
     
     // Calculate the pixel coordinates within the captured image
@@ -633,10 +723,14 @@ ipcMain.handle('transparentize-color', async (event, coords) => {
 });
 
 // IPC handler for custom tolerance transparentize
-ipcMain.handle('get-custom-tolerance', async () => {
+ipcMain.handle('get-custom-tolerance', async (event) => {
   try {
-    const { dialog } = require('electron');
-    const result = await dialog.showMessageBox(mainWindow, {
+    const senderWindow = BrowserWindow.fromWebContents(event.sender);
+    if (!senderWindow) {
+      throw new Error('Could not find sender window');
+    }
+    
+    const result = await dialog.showMessageBox(senderWindow, {
       type: 'question',
       title: 'Custom Tolerance',
       message: 'Enter color tolerance value (0-100):',
@@ -659,10 +753,49 @@ ipcMain.handle('get-custom-tolerance', async () => {
   }
 });
 
-// IPC handler for showing help dialog
-ipcMain.handle('show-help-dialog', async () => {
+// IPC handler for creating new window from renderer
+ipcMain.handle('create-new-window', async (event) => {
   try {
-    const result = await dialog.showMessageBox(mainWindow, {
+    console.log('Creating new window from renderer request...');
+    const newWindow = createWindow();
+    return { success: true, windowId: newWindow.id };
+  } catch (error) {
+    console.error('Failed to create new window:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// IPC handler for closing all windows
+ipcMain.handle('close-all-windows', async (event) => {
+  try {
+    console.log('Closing all windows...');
+    const allWindows = [...windows]; // Create a copy to avoid array modification issues
+    let closedCount = 0;
+    
+    allWindows.forEach(window => {
+      if (window && !window.isDestroyed()) {
+        window.close();
+        closedCount++;
+      }
+    });
+    
+    console.log(`Closed ${closedCount} windows`);
+    return { success: true, closedCount: closedCount };
+  } catch (error) {
+    console.error('Failed to close all windows:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// IPC handler for showing help dialog
+ipcMain.handle('show-help-dialog', async (event) => {
+  try {
+    const senderWindow = BrowserWindow.fromWebContents(event.sender);
+    if (!senderWindow) {
+      throw new Error('Could not find sender window');
+    }
+    
+    const result = await dialog.showMessageBox(senderWindow, {
       type: 'info',
       title: 'ScreenClip Help',
       message: 'ScreenClip - Advanced Screenshot Tool',
@@ -682,6 +815,8 @@ CONTROLS:
 • Left Click + Drag: Move the window
 • Middle Click + Drag: Pan/move image within window
 • Right Click: Open context menu with all features
+• Right Double-Click: Create new window
+• Left Double-Click: Capture screenshot
 
 CONTEXT MENU:
 • Copy/Paste: Clipboard operations with DPI awareness
@@ -692,6 +827,9 @@ CONTEXT MENU:
 • Transparentize Color: Remove backgrounds with tolerance control
   - Multiple tolerance levels from precise to broad matching
   - Custom tolerance input for exact control
+• New Window: Create additional window for parallel workflows
+• Close Window: Close current window
+• Close All Windows: Close all open ScreenClip windows
 
 TRANSPARENTIZE TOLERANCE GUIDE:
 • Low (5): Very precise color matching

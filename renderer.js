@@ -395,8 +395,8 @@ ipcRenderer.on('transparentize-color', async (event, coords) => {
           
           console.log(`Target color: RGB(${targetR}, ${targetG}, ${targetB}) at (${targetX}, ${targetY})`);
           
-          // Color tolerance for matching (adjustable - you can make this configurable later)
-          const tolerance = 20; // Increased for better matching
+          // Color tolerance for matching (from menu selection or default)
+          const tolerance = coords.tolerance || 20; // Use provided tolerance or default to 20
           let pixelsTransparentized = 0;
           
           // Process all pixels
@@ -461,6 +461,144 @@ ipcRenderer.on('transparentize-color', async (event, coords) => {
     }
   } catch (error) {
     console.error('Error transparentizing color:', error);
+  }
+});
+
+// Menu-triggered custom tolerance transparentize color event
+ipcRenderer.on('transparentize-color-custom', async (event, coords) => {
+  console.log('Custom tolerance transparentize color event received in renderer at:', coords);
+  
+  try {
+    // Show a prompt for custom tolerance
+    const toleranceStr = prompt('Enter color tolerance value (0-100):\n\nLower values = exact color match\nHigher values = broader color range', '20');
+    
+    if (toleranceStr !== null) {
+      const tolerance = parseInt(toleranceStr);
+      
+      if (!isNaN(tolerance) && tolerance >= 0 && tolerance <= 100) {
+        // Add tolerance to coords and process
+        const coordsWithTolerance = { ...coords, tolerance: tolerance };
+        
+        // Trigger the regular transparentize with custom tolerance
+        const result = await ipcRenderer.invoke('transparentize-color', coordsWithTolerance);
+        
+        if (result.success) {
+          // Process the image with custom tolerance (reuse the same logic)
+          // Create a canvas to process the image
+          const canvas = document.createElement('canvas');
+          const ctx = canvas.getContext('2d');
+          
+          // Create an image from the captured buffer
+          const img = new Image();
+          img.onload = () => {
+            // Set canvas size to match the captured image
+            canvas.width = img.width;
+            canvas.height = img.height;
+            
+            // Draw the image to canvas
+            ctx.drawImage(img, 0, 0);
+            
+            // Get image data
+            const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+            const data = imageData.data;
+            
+            // Get the color at the target pixel (with bounds checking)
+            const targetX = Math.max(0, Math.min(result.targetPixel.x, canvas.width - 1));
+            const targetY = Math.max(0, Math.min(result.targetPixel.y, canvas.height - 1));
+            const pixelIndex = (targetY * canvas.width + targetX) * 4;
+            
+            if (pixelIndex >= 0 && pixelIndex < data.length - 3) {
+              const targetR = data[pixelIndex];
+              const targetG = data[pixelIndex + 1];
+              const targetB = data[pixelIndex + 2];
+              
+              console.log(`Target color: RGB(${targetR}, ${targetG}, ${targetB}) at (${targetX}, ${targetY})`);
+              console.log(`Using custom tolerance: ${tolerance}`);
+              
+              let pixelsTransparentized = 0;
+              
+              // Process all pixels
+              for (let i = 0; i < data.length; i += 4) {
+                const r = data[i];
+                const g = data[i + 1];
+                const b = data[i + 2];
+                
+                // Calculate color difference
+                const colorDiff = Math.sqrt(
+                  Math.pow(r - targetR, 2) +
+                  Math.pow(g - targetG, 2) +
+                  Math.pow(b - targetB, 2)
+                );
+                
+                // If color is within tolerance, make it transparent
+                if (colorDiff <= tolerance) {
+                  data[i + 3] = 0; // Set alpha to 0 (transparent)
+                  pixelsTransparentized++;
+                }
+              }
+              
+              // Put the modified image data back
+              ctx.putImageData(imageData, 0, 0);
+              
+              // Convert canvas to data URL
+              const processedDataUrl = canvas.toDataURL('image/png');
+              
+              // Update the background image
+              const body = document.querySelector('body');
+              body.style.backgroundImage = `url(${processedDataUrl})`;
+              
+              // Reset scaling and positioning to fit the new image
+              body.style.backgroundSize = `${result.logicalWidth}px ${result.logicalHeight}px`;
+              body.style.backgroundPosition = '2px 2px'; // Account for border
+              body.style.backgroundRepeat = 'no-repeat';
+              
+              // Reset image tracking variables
+              currentImageScale = 1.0;
+              originalImageWidth = result.logicalWidth;
+              originalImageHeight = result.logicalHeight;
+              originalPositionX = 2;
+              originalPositionY = 2;
+              imageOffset = { x: 2, y: 2 };
+              
+              console.log(`Transparentized color RGB(${targetR}, ${targetG}, ${targetB}) with custom tolerance ${tolerance}`);
+              console.log(`Processed image size: ${result.logicalWidth}x${result.logicalHeight}px`);
+              console.log(`Pixels transparentized: ${pixelsTransparentized} out of ${data.length / 4}`);
+            } else {
+              console.error('Target pixel coordinates out of bounds');
+            }
+          };
+          
+          img.onerror = (error) => {
+            console.error('Failed to load captured image:', error);
+          };
+          
+          // Load the image data
+          img.src = `data:image/png;base64,${result.imageBuffer}`;
+        } else {
+          console.error('Failed to capture image for custom transparentizing:', result.error);
+        }
+      } else {
+        alert('Please enter a valid number between 0 and 100');
+      }
+    }
+  } catch (error) {
+    console.error('Error with custom tolerance transparentizing:', error);
+  }
+});
+
+// Menu-triggered help event
+ipcRenderer.on('show-help', async () => {
+  console.log('Show help event received in renderer');
+  
+  try {
+    const result = await ipcRenderer.invoke('show-help-dialog');
+    if (result.success) {
+      console.log('Help dialog displayed successfully');
+    } else {
+      console.error('Failed to show help dialog:', result.error);
+    }
+  } catch (error) {
+    console.error('Error showing help dialog:', error);
   }
 });
 
@@ -788,6 +926,37 @@ document.addEventListener('mouseup', () => {
     console.log(isImageDrag ? 'Image drag ended' : 'Window drag ended');
     isImageDrag = false;
     rightClickDragStarted = false; // Reset flag
+  }
+});
+
+// Track right-click double-click for new window creation
+let rightClickCount = 0;
+let rightClickTimer = null;
+
+// Add mousedown event to track right double-clicks
+document.addEventListener('mousedown', (event) => {
+  if (event.button === 2) { // Right mouse button
+    rightClickCount++;
+    
+    if (rightClickCount === 1) {
+      // Start timer for double-click detection
+      rightClickTimer = setTimeout(() => {
+        rightClickCount = 0; // Reset after timeout
+      }, 300); // 300ms double-click window
+    } else if (rightClickCount === 2) {
+      // Right double-click detected!
+      clearTimeout(rightClickTimer);
+      rightClickCount = 0;
+      
+      console.log('Right double-click detected, creating new window...');
+      
+      // Send IPC message to create new window
+      ipcRenderer.invoke('create-new-window');
+      
+      // Prevent the context menu from appearing
+      event.preventDefault();
+      return false;
+    }
   }
 });
 
