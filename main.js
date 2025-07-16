@@ -65,38 +65,76 @@ ipcMain.handle('capture-screenshot', async () => {
     // Wait a bit for the window to hide
     await new Promise(resolve => setTimeout(resolve, 200));
     
-    // Get the primary display with proper DPI scaling
-    const primaryDisplay = screen.getPrimaryDisplay();
-    const scaleFactor = primaryDisplay.scaleFactor;
-    const displayBounds = primaryDisplay.bounds;
+    // Get the display that contains the window (not just primary display)
+    const windowCenterX = windowBounds.x + windowBounds.width / 2;
+    const windowCenterY = windowBounds.y + windowBounds.height / 2;
+    const currentDisplay = screen.getDisplayNearestPoint({ x: windowCenterX, y: windowCenterY });
     
-    // Calculate actual pixel dimensions for full screen capture
-    const fullWidth = Math.floor(displayBounds.width * scaleFactor);
-    const fullHeight = Math.floor(displayBounds.height * scaleFactor);
+    const scaleFactor = currentDisplay.scaleFactor;
+    const displayBounds = currentDisplay.bounds;
+    
+    // Get all displays to help identify which screen source we need
+    const allDisplays = screen.getAllDisplays();
+    const currentDisplayIndex = allDisplays.findIndex(display => 
+      display.bounds.x === currentDisplay.bounds.x && 
+      display.bounds.y === currentDisplay.bounds.y
+    );
     
     console.log(`Window: ${windowBounds.x},${windowBounds.y} ${windowBounds.width}x${windowBounds.height}`);
-    console.log(`Display: ${displayBounds.width}x${displayBounds.height}, Scale: ${scaleFactor}`);
-    console.log(`Full capture: ${fullWidth}x${fullHeight}`);
+    console.log(`Current Display: ${displayBounds.x},${displayBounds.y} ${displayBounds.width}x${displayBounds.height}, Scale: ${scaleFactor}`);
+    console.log(`Display Index: ${currentDisplayIndex} of ${allDisplays.length} displays`);
     
-    // Capture full screen
+    // Capture all screens at their native resolution
     const sources = await desktopCapturer.getSources({
       types: ['screen'],
       thumbnailSize: { 
-        width: fullWidth, 
-        height: fullHeight 
+        // Request exact display dimensions in physical pixels
+        width: Math.floor(displayBounds.width * scaleFactor),
+        height: Math.floor(displayBounds.height * scaleFactor)
       }
     });
     
     if (sources.length > 0) {
-      const fullScreenshot = sources[0].thumbnail;
+      // Try to match the screen source to our current display
+      let screenSource = sources[0]; // Default fallback
       
-      // Calculate window area in actual pixels accounting for DPI
+      // If we have multiple sources, try to pick the right one
+      if (sources.length > 1 && currentDisplayIndex >= 0 && currentDisplayIndex < sources.length) {
+        screenSource = sources[currentDisplayIndex];
+        console.log(`Using screen source ${currentDisplayIndex} for current display`);
+      } else {
+        console.log(`Using default screen source 0 (${sources.length} available, index was ${currentDisplayIndex})`);
+      }
+      
+      const fullScreenshot = screenSource.thumbnail;
+      
+      // Check what we actually got
+      const screenshotSize = fullScreenshot.getSize();
+      console.log(`Screenshot size: ${screenshotSize.width}x${screenshotSize.height}`);
+      console.log(`Display logical size: ${displayBounds.width}x${displayBounds.height}`);
+      console.log(`Expected physical size: ${displayBounds.width * scaleFactor}x${displayBounds.height * scaleFactor}`);
+      
+      // Calculate the ACTUAL scale factor from what we received vs what we expected
+      const actualScaleX = screenshotSize.width / displayBounds.width;
+      const actualScaleY = screenshotSize.height / displayBounds.height;
+      
+      // Use the calculated scale factor instead of the reported one
+      const actualScale = actualScaleX; // They should be the same for square pixels
+      
+      console.log(`Reported scale factor: ${scaleFactor}`);
+      console.log(`Calculated scale: X=${actualScaleX}, Y=${actualScaleY}`);
+      console.log(`Using calculated scale factor: ${actualScale}`);
+      
+      // Calculate window area using the ACTUAL scale factor from the screenshot
       const cropInfo = {
-        windowX: Math.floor((windowBounds.x - displayBounds.x) * scaleFactor),
-        windowY: Math.floor((windowBounds.y - displayBounds.y) * scaleFactor),
-        windowWidth: Math.floor(windowBounds.width * scaleFactor),
-        windowHeight: Math.floor(windowBounds.height * scaleFactor),
-        fullScreenshot: fullScreenshot.toDataURL()
+        windowX: Math.floor((windowBounds.x - displayBounds.x) * actualScale),
+        windowY: Math.floor((windowBounds.y - displayBounds.y) * actualScale),
+        windowWidth: Math.floor(windowBounds.width * actualScale),
+        windowHeight: Math.floor(windowBounds.height * actualScale),
+        fullScreenshot: fullScreenshot.toDataURL(),
+        scaleFactor: actualScale, // Use the calculated scale factor
+        displayBounds: displayBounds,
+        screenshotSize: screenshotSize
       };
       
       console.log(`Crop info: ${cropInfo.windowX},${cropInfo.windowY} ${cropInfo.windowWidth}x${cropInfo.windowHeight}`);
@@ -114,6 +152,15 @@ ipcMain.handle('capture-screenshot', async () => {
     mainWindow.show();
     return null;
   }
+});
+
+// IPC handler to get display info for DPI scaling
+ipcMain.handle('get-display-info', () => {
+  const primaryDisplay = screen.getPrimaryDisplay();
+  return {
+    scaleFactor: primaryDisplay.scaleFactor,
+    bounds: primaryDisplay.bounds
+  };
 });
 
 // IPC handlers for window dragging with size preservation
