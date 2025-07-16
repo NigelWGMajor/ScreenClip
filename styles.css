@@ -18,7 +18,6 @@ body {
   box-sizing: border-box; /* Ensures the border is included in the element's dimensions */
 }
 
-
 #app {
   width: 100%;
   height: 100%;

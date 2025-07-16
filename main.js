@@ -116,6 +116,30 @@ ipcMain.handle('capture-screenshot', async () => {
   }
 });
 
+// IPC handlers for window dragging with size preservation
+ipcMain.handle('start-drag', (event, { mouseX, mouseY }) => {
+  const windowBounds = mainWindow.getBounds();
+  
+  return {
+    windowX: windowBounds.x,
+    windowY: windowBounds.y,
+    offsetX: mouseX,
+    offsetY: mouseY,
+    targetWidth: windowBounds.width,  // Use current width instead of hardcoded
+    targetHeight: windowBounds.height // Use current height instead of hardcoded
+  };
+});
+
+ipcMain.handle('do-drag', (event, { x, y, targetWidth, targetHeight }) => {
+  // Set both position and size to prevent window from growing
+  mainWindow.setBounds({
+    x: x,
+    y: y,
+    width: targetWidth,
+    height: targetHeight
+  });
+});
+
 app.on('ready', createWindow);
 
 app.on('window-all-closed', () => {
