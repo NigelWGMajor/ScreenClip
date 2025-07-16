@@ -59,6 +59,12 @@ function createWindow() {
         mainWindow.webContents.send('reset-scale');
       }
     },
+    {
+      label: 'Crop to Current View',
+      click: () => {
+        mainWindow.webContents.send('crop-to-view');
+      }
+    },
     { type: 'separator' },
     {
       label: 'Open Dev Tools',
@@ -456,6 +462,51 @@ ipcMain.handle('save-image-file', async () => {
     }
   } catch (error) {
     console.error('Failed to save image file:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// IPC handler for cropping window to current view
+ipcMain.handle('crop-to-current-view', async (event, cropInfo) => {
+  try {
+    console.log('Cropping window to current view:', cropInfo);
+    
+    // Get current window bounds
+    const currentBounds = mainWindow.getBounds();
+    
+    // Calculate the new window size
+    // cropInfo contains: visibleWidth, visibleHeight, offsetX, offsetY, borderWidth, visibleCenterX, visibleCenterY
+    const newWidth = Math.max(100, Math.round(cropInfo.visibleWidth + (cropInfo.borderWidth * 2)));  // Add border space back
+    const newHeight = Math.max(100, Math.round(cropInfo.visibleHeight + (cropInfo.borderWidth * 2))); // Add border space back
+    
+    // Calculate the center of the visible image area in screen coordinates
+    const currentVisibleCenterX = currentBounds.x + cropInfo.visibleCenterX;
+    const currentVisibleCenterY = currentBounds.y + cropInfo.visibleCenterY;
+    
+    // Position the new window so its center aligns with the visible image center
+    const newX = currentVisibleCenterX - (newWidth / 2);
+    const newY = currentVisibleCenterY - (newHeight / 2);
+    
+    console.log(`Current window: ${currentBounds.width}x${currentBounds.height} at (${currentBounds.x}, ${currentBounds.y})`);
+    console.log(`Visible image center: (${cropInfo.visibleCenterX}, ${cropInfo.visibleCenterY}) relative to window`);
+    console.log(`Visible image center in screen coords: (${currentVisibleCenterX}, ${currentVisibleCenterY})`);
+    console.log(`New window: ${newWidth}x${newHeight} at (${newX}, ${newY}) - centered on visible image`);
+    console.log(`Crop offset: (${cropInfo.offsetX}, ${cropInfo.offsetY}), border: ${cropInfo.borderWidth}px`);
+    
+    // Set the new window bounds
+    mainWindow.setBounds({
+      x: Math.round(newX),
+      y: Math.round(newY),
+      width: newWidth,
+      height: newHeight
+    });
+    
+    return {
+      success: true,
+      newBounds: { x: newX, y: newY, width: newWidth, height: newHeight }
+    };
+  } catch (error) {
+    console.error('Failed to crop window:', error);
     return { success: false, error: error.message };
   }
 });

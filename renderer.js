@@ -235,6 +235,124 @@ ipcRenderer.on('menu-paste', async () => {
   document.dispatchEvent(event);
 });
 
+// Menu-triggered crop to current view event
+ipcRenderer.on('crop-to-view', async () => {
+  console.log('Crop to current view event received in renderer');
+  
+  try {
+    const body = document.querySelector('body');
+    const backgroundImage = getComputedStyle(body).backgroundImage;
+    
+    if (backgroundImage && backgroundImage !== 'none') {
+      // Get current window bounds
+      const currentBounds = await ipcRenderer.invoke('get-window-bounds');
+      
+      // Get current background properties
+      const backgroundSize = getComputedStyle(body).backgroundSize;
+      const backgroundPosition = getComputedStyle(body).backgroundPosition;
+      const borderStyle = getComputedStyle(body).borderStyle;
+      const borderWidth = borderStyle === 'solid' ? 2 : 0; // 2px border or transparent
+      
+      console.log(`Current window: ${currentBounds.width}x${currentBounds.height}`);
+      console.log(`Background size: ${backgroundSize}`);
+      console.log(`Background position: ${backgroundPosition}`);
+      console.log(`Border width: ${borderWidth}px`);
+      
+      // Parse background size
+      const sizeParts = backgroundSize.split(' ');
+      const imageDisplayWidth = parseFloat(sizeParts[0]) || 0;
+      const imageDisplayHeight = parseFloat(sizeParts[1]) || imageDisplayWidth; // Handle single value
+      
+      // Parse background position
+      const positionParts = backgroundPosition.split(' ');
+      const imageOffsetX = parseFloat(positionParts[0]) || 0;
+      const imageOffsetY = parseFloat(positionParts[1]) || 0;
+      
+      // Calculate the visible area of the image within the current window
+      const windowContentWidth = currentBounds.width - (borderWidth * 2);
+      const windowContentHeight = currentBounds.height - (borderWidth * 2);
+      
+      // Find the intersection of the image and the window content area
+      const imageLeft = imageOffsetX;
+      const imageTop = imageOffsetY;
+      const imageRight = imageLeft + imageDisplayWidth;
+      const imageBottom = imageTop + imageDisplayHeight;
+      
+      const viewLeft = borderWidth;
+      const viewTop = borderWidth;
+      const viewRight = viewLeft + windowContentWidth;
+      const viewBottom = viewTop + windowContentHeight;
+      
+      // Calculate intersection bounds
+      const visibleLeft = Math.max(imageLeft, viewLeft);
+      const visibleTop = Math.max(imageTop, viewTop);
+      const visibleRight = Math.min(imageRight, viewRight);
+      const visibleBottom = Math.min(imageBottom, viewBottom);
+      
+      // Calculate visible dimensions
+      const visibleWidth = Math.max(0, visibleRight - visibleLeft);
+      const visibleHeight = Math.max(0, visibleBottom - visibleTop);
+      
+      console.log(`Image bounds: ${imageLeft}, ${imageTop} to ${imageRight}, ${imageBottom}`);
+      console.log(`View bounds: ${viewLeft}, ${viewTop} to ${viewRight}, ${viewBottom}`);
+      console.log(`Visible area: ${visibleLeft}, ${visibleTop} to ${visibleRight}, ${visibleBottom}`);
+      console.log(`Visible size: ${visibleWidth}x${visibleHeight}`);
+      
+      if (visibleWidth > 0 && visibleHeight > 0) {
+        // Calculate the center of the visible image area relative to the current window
+        const visibleCenterX = visibleLeft + (visibleWidth / 2);
+        const visibleCenterY = visibleTop + (visibleHeight / 2);
+        
+        // Calculate the offset adjustments needed
+        const offsetX = visibleLeft - borderWidth; // How much to move the window
+        const offsetY = visibleTop - borderWidth; // How much to move the window
+        
+        // Calculate new background position after cropping
+        const newBackgroundX = imageOffsetX - visibleLeft + borderWidth;
+        const newBackgroundY = imageOffsetY - visibleTop + borderWidth;
+        
+        // Send crop information to main process
+        const cropInfo = {
+          visibleWidth: visibleWidth, // Don't add border - we want the exact visible image size
+          visibleHeight: visibleHeight, // Don't add border - we want the exact visible image size
+          offsetX: offsetX,
+          offsetY: offsetY,
+          borderWidth: borderWidth,
+          newBackgroundX: newBackgroundX,
+          newBackgroundY: newBackgroundY,
+          visibleCenterX: visibleCenterX, // Center of visible area relative to current window
+          visibleCenterY: visibleCenterY  // Center of visible area relative to current window
+        };
+        
+        console.log(`Visible center: (${visibleCenterX}, ${visibleCenterY}) relative to current window`);
+        console.log(`Crop info:`, cropInfo);
+        
+        // Execute the crop
+        const result = await ipcRenderer.invoke('crop-to-current-view', cropInfo);
+        
+        if (result.success) {
+          // Update the background position to show the cropped area correctly
+          body.style.backgroundPosition = `${newBackgroundX}px ${newBackgroundY}px`;
+          
+          // Update image offset tracking
+          imageOffset = { x: newBackgroundX, y: newBackgroundY };
+          
+          console.log(`Window cropped successfully to ${result.newBounds.width}x${result.newBounds.height}`);
+          console.log(`New background position: ${newBackgroundX}px, ${newBackgroundY}px`);
+        } else {
+          console.error('Failed to crop window:', result.error);
+        }
+      } else {
+        console.log('No visible image area to crop to');
+      }
+    } else {
+      console.log('No background image to crop');
+    }
+  } catch (error) {
+    console.error('Error cropping to current view:', error);
+  }
+});
+
 // Mouse wheel event to adjust opacity, image scale, or window scale
 document.addEventListener('wheel', (event) => {
   console.log('Mouse wheel event detected, deltaY:', event.deltaY, 'ctrlKey:', event.ctrlKey, 'shiftKey:', event.shiftKey);
@@ -688,4 +806,141 @@ document.addEventListener('keydown', async (event) => {
       console.error('Error pasting from clipboard:', error);
     }
   }
+});
+
+// Drag and drop support for image files
+document.addEventListener('DOMContentLoaded', () => {
+  const body = document.querySelector('body');
+  
+  // Prevent default drag behaviors on the document
+  document.addEventListener('dragenter', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+  });
+  
+  document.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // Add visual feedback
+    body.style.borderColor = 'blue';
+    body.style.borderWidth = '4px';
+    body.style.borderStyle = 'dashed';
+  });
+  
+  document.addEventListener('dragleave', (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // Only remove the visual feedback if we're actually leaving the window
+    if (e.clientX <= 0 || e.clientY <= 0 || 
+        e.clientX >= window.innerWidth || e.clientY >= window.innerHeight) {
+      // Restore original border
+      body.style.borderColor = body.style.borderColor === 'transparent' ? 'transparent' : 'red';
+      body.style.borderWidth = '2px';
+      body.style.borderStyle = 'solid';
+    }
+  });
+  
+  document.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    // Restore original border
+    body.style.borderColor = body.style.borderColor === 'transparent' ? 'transparent' : 'red';
+    body.style.borderWidth = '2px';
+    body.style.borderStyle = 'solid';
+    
+    const files = Array.from(e.dataTransfer.files);
+    const imageFiles = files.filter(file => file.type.startsWith('image/'));
+    
+    if (imageFiles.length > 0) {
+      const file = imageFiles[0]; // Use the first image file
+      console.log(`Processing dropped image: ${file.name} (${file.type})`);
+      
+      try {
+        // Read the file as data URL
+        const reader = new FileReader();
+        reader.onload = async (event) => {
+          const dataUrl = event.target.result;
+          
+          // Create an image to get dimensions
+          const img = new Image();
+          img.onload = async () => {
+            console.log(`Dropped image size: ${img.width}x${img.height}px`);
+            
+            // Apply the dropped image as background
+            body.style.backgroundImage = `url(${dataUrl})`;
+            body.style.backgroundRepeat = 'no-repeat';
+            
+            // Automatically turn off border and set opacity to 100% when dropping
+            body.style.borderColor = 'transparent';
+            body.style.opacity = '1';
+            currentOpacity = 1.0;
+            console.log('Border turned off and opacity set to 100% for dropped image');
+            
+            // Use the dropped image dimensions
+            originalImageWidth = img.width;
+            originalImageHeight = img.height;
+            currentImageScale = 1.0; // Reset scale to 1:1
+            
+            console.log(`Setting background to dropped image size: ${originalImageWidth}x${originalImageHeight}px`);
+            
+            // Set background size to image dimensions
+            body.style.backgroundSize = `${originalImageWidth}px ${originalImageHeight}px`;
+            
+            // Resize window to match image dimensions exactly (no border needed since it's transparent)
+            try {
+              const currentBounds = await ipcRenderer.invoke('get-window-bounds');
+              
+              // Since the border is transparent when loading, size window exactly to image dimensions
+              const newBounds = {
+                x: currentBounds.x,
+                y: currentBounds.y,
+                width: originalImageWidth,   // Exact image width - no border
+                height: originalImageHeight  // Exact image height - no border
+              };
+              
+              console.log(`Resizing window to match dropped image: ${newBounds.width}x${newBounds.height}px`);
+              
+              await ipcRenderer.invoke('set-window-bounds', newBounds);
+              
+              // Position the image at (0,0) since there's no visible border
+              const initialX = 0;
+              const initialY = 0;
+              
+              console.log(`Positioning dropped image at: ${initialX}px, ${initialY}px (no border, perfect fit)`);
+              
+              body.style.backgroundPosition = `${initialX}px ${initialY}px`;
+              
+              // Store original position for reset functionality
+              originalPositionX = initialX;
+              originalPositionY = initialY;
+              
+              // Reset image offset to the initial position
+              imageOffset = { x: initialX, y: initialY };
+              
+              // Store the new window bounds as original for reset functionality
+              originalWindowBounds = newBounds;
+              currentWindowScale = 1.0; // Reset window scale tracking
+              
+              console.log(`Image loaded successfully from dropped file: ${file.name}`);
+              
+            } catch (error) {
+              console.error('Failed to resize window for dropped image:', error);
+            }
+          };
+          
+          img.src = dataUrl;
+        };
+        
+        reader.readAsDataURL(file);
+        
+      } catch (error) {
+        console.error('Error processing dropped image:', error);
+      }
+    } else {
+      console.log('No image files found in dropped items');
+    }
+  });
 });
