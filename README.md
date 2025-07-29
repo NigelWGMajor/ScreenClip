@@ -1,18 +1,66 @@
 # ScreenClip
 
-## To run:
+## Quick Start
 
+### Development
+```bash
+npm install
 npm start
+```
 
-Right click context menu
+### Building Executable
+```bash
+npm run build-win    # Creates installer and portable .exe
+```
 
-currently just a rextangle, sizable, with a hideable red border.
+See [BUILD.md](BUILD.md) for detailed build instructions.
 
-Next: allow dreag from anywhere in the rectangle, not just the border.
+## Description
 
-Aim: to be able to drag a rectangle over any part of the screen, and have that area copied to the clipboard as an image, then loaded into the rectanbgle itself
+A simple screen clipping tool that allows users to capture a portion of their screen and manipulate it within a draggable rectangle.
 
-Features:
+Allows snipping of screen rectangles to a sizable window.
+
+Simple version using Electron and React.
+
+## Quickstart
+
+Launch from taskbar icon
+
+future: Click and drag to create a rectangle
+Drag the rectangle or its edges to surround the portion of interest
+Double-click to snap
+
+F1 for help
+^c to copy to clipboard
+^v to paste from clipboard
+^s to save to file
+^b to toggle border
+^f to open file
+^q to close window
+^n for new window
+^m min/max/restore window
+^min/max/restore all windows
+^x to close all windows but the latest
+^z undo last transparency or fill
+^y redo last transparency or fill
+tab/shift tab to cycle through windows
+
+|control|only    |shift      |control      |sh+sctrl |
+|-------|--------|-----------|-------------|---------|
+|arrows |next w  |nudge frame|nudge content|nudge all|
+|wheel  |fade    |scale frame|scale content|scale all|
+|drag   |move all|pan   frame|pan   content| -       |
+|click  |        |           |             |         |
+|dclick |snap    |           |snap autosave|         | 
+|rclick |context |           |settings     |         |
+
+right-click for context menu
+right-click position samples screen for transparency and fill
+
+## Features:
+
+<need to redo>
 
 - hideable border
 - drag from anywhere in the rectangle, not just the border
