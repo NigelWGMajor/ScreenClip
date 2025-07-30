@@ -243,115 +243,103 @@ ipcRenderer.on('menu-paste', async () => {
 });
 
 // Menu-triggered crop to current view event
+// Replacement crop-to-view function
 ipcRenderer.on('crop-to-view', async () => {
   console.log('Crop to current view event received in renderer');
   
   try {
-    const body = document.querySelector('body');
+    const content = document.querySelector('.content');
     const backgroundImage = getComputedStyle(content).backgroundImage;
     
     if (backgroundImage && backgroundImage !== 'none') {
-      // Get current window bounds
-      const currentBounds = await ipcRenderer.invoke('get-window-bounds');
+      // Check if this is a screenshot (has originalWindowBounds from capture)
+      if (!originalWindowBounds) {
+        console.log('Cannot crop: not a screenshot or missing original window bounds');
+        return;
+      }
       
-      // Get current background properties
-      const backgroundSize = getComputedStyle(body).backgroundSize;
-      const backgroundPosition = getComputedStyle(body).backgroundPosition;
-      const borderStyle = getComputedStyle(body).borderStyle;
-      const borderWidth = borderStyle === 'solid' ? 2 : 0; // 2px border or transparent
+      // Extract the data URL from the background image
+      const dataUrlMatch = backgroundImage.match(/url\(["']?(.*?)["']?\)/);
+      if (!dataUrlMatch) {
+        console.log('Cannot extract image data URL');
+        return;
+      }
       
-      console.log(`Current window: ${currentBounds.width}x${currentBounds.height}`);
-      console.log(`Background size: ${backgroundSize}`);
-      console.log(`Background position: ${backgroundPosition}`);
-      console.log(`Border width: ${borderWidth}px`);
+      const imageDataUrl = dataUrlMatch[1];
+      const borderWidth = 2; // Border area to crop to
       
-      // Parse background size
-      const sizeParts = backgroundSize.split(' ');
-      const imageDisplayWidth = parseFloat(sizeParts[0]) || 0;
-      const imageDisplayHeight = parseFloat(sizeParts[1]) || imageDisplayWidth; // Handle single value
+      console.log('Cropping screenshot to original window border area');
       
-      // Parse background position
-      const positionParts = backgroundPosition.split(' ');
-      const imageOffsetX = parseFloat(positionParts[0]) || 0;
-      const imageOffsetY = parseFloat(positionParts[1]) || 0;
+      // Create canvas to crop the image
+      const canvas = document.createElement('canvas');
+      const ctx = canvas.getContext('2d');
       
-      // Calculate the visible area of the image within the current window
-      const windowContentWidth = currentBounds.width - (borderWidth * 2);
-      const windowContentHeight = currentBounds.height - (borderWidth * 2);
-      
-      // Find the intersection of the image and the window content area
-      const imageLeft = imageOffsetX;
-      const imageTop = imageOffsetY;
-      const imageRight = imageLeft + imageDisplayWidth;
-      const imageBottom = imageTop + imageDisplayHeight;
-      
-      const viewLeft = borderWidth;
-      const viewTop = borderWidth;
-      const viewRight = viewLeft + windowContentWidth;
-      const viewBottom = viewTop + windowContentHeight;
-      
-      // Calculate intersection bounds
-      const visibleLeft = Math.max(imageLeft, viewLeft);
-      const visibleTop = Math.max(imageTop, viewTop);
-      const visibleRight = Math.min(imageRight, viewRight);
-      const visibleBottom = Math.min(imageBottom, viewBottom);
-      
-      // Calculate visible dimensions
-      const visibleWidth = Math.max(0, visibleRight - visibleLeft);
-      const visibleHeight = Math.max(0, visibleBottom - visibleTop);
-      
-      console.log(`Image bounds: ${imageLeft}, ${imageTop} to ${imageRight}, ${imageBottom}`);
-      console.log(`View bounds: ${viewLeft}, ${viewTop} to ${viewRight}, ${viewBottom}`);
-      console.log(`Visible area: ${visibleLeft}, ${visibleTop} to ${visibleRight}, ${visibleBottom}`);
-      console.log(`Visible size: ${visibleWidth}x${visibleHeight}`);
-      
-      if (visibleWidth > 0 && visibleHeight > 0) {
-        // Calculate the center of the visible image area relative to the current window
-        const visibleCenterX = visibleLeft + (visibleWidth / 2);
-        const visibleCenterY = visibleTop + (visibleHeight / 2);
+      // Load the current background image
+      const img = new Image();
+      img.onload = async () => {
+        // Get current display scale factor for proper pixel calculations
+        const displayInfo = await ipcRenderer.invoke('get-display-info');
+        const scaleFactor = displayInfo.scaleFactor;
         
-        // Calculate the offset adjustments needed
-        const offsetX = visibleLeft - borderWidth; // How much to move the window
-        const offsetY = visibleTop - borderWidth; // How much to move the window
+        // Calculate crop area: the original window area within the full screen image
+        // The screenshot contains the full window including border, so crop from window position
+        // originalWindowBounds is in logical pixels, but the image is in physical pixels
+        const cropX = Math.floor(originalWindowBounds.x * scaleFactor);
+        const cropY = Math.floor(originalWindowBounds.y * scaleFactor);
+        const cropWidth = Math.floor(originalWindowBounds.width * scaleFactor);
+        const cropHeight = Math.floor(originalWindowBounds.height * scaleFactor);
         
-        // Calculate new background position after cropping
-        const newBackgroundX = imageOffsetX - visibleLeft + borderWidth;
-        const newBackgroundY = imageOffsetY - visibleTop + borderWidth;
+        console.log(`Original window: ${originalWindowBounds.width}x${originalWindowBounds.height} at (${originalWindowBounds.x}, ${originalWindowBounds.y})`);
+        console.log(`Cropping from full screen image: ${cropWidth}x${cropHeight} at (${cropX}, ${cropY}) (physical pixels)`);
+        console.log(`Scale factor: ${scaleFactor}`);
         
-        // Send crop information to main process
-        const cropInfo = {
-          visibleWidth: visibleWidth, // Don't add border - we want the exact visible image size
-          visibleHeight: visibleHeight, // Don't add border - we want the exact visible image size
-          offsetX: offsetX,
-          offsetY: offsetY,
-          borderWidth: borderWidth,
-          newBackgroundX: newBackgroundX,
-          newBackgroundY: newBackgroundY,
-          visibleCenterX: visibleCenterX, // Center of visible area relative to current window
-          visibleCenterY: visibleCenterY  // Center of visible area relative to current window
+        // Set canvas size to the crop area (in physical pixels for quality)
+        canvas.width = cropWidth;
+        canvas.height = cropHeight;
+        
+        // Draw the cropped portion from the full screen image
+        ctx.drawImage(img, cropX, cropY, cropWidth, cropHeight, 0, 0, cropWidth, cropHeight);
+        
+        // Convert to data URL
+        const croppedDataUrl = canvas.toDataURL('image/png');
+        
+        // Calculate logical dimensions for display - this is the full window size
+        const logicalWidth = Math.round(cropWidth / scaleFactor);
+        const logicalHeight = Math.round(cropHeight / scaleFactor);
+        
+        // Update the background image with cropped version
+        content.style.backgroundImage = `url(${croppedDataUrl})`;
+        content.style.backgroundSize = `${logicalWidth}px ${logicalHeight}px`;
+        content.style.backgroundPosition = '0px 0px';
+        content.style.backgroundRepeat = 'no-repeat';
+        
+        // Update tracking variables
+        originalImageWidth = logicalWidth;
+        originalImageHeight = logicalHeight;
+        originalPositionX = 0;
+        originalPositionY = 0;
+        imageOffset = { x: 0, y: 0 };
+        currentImageScale = 1.0;
+        
+        // Resize window to match cropped content exactly (no additional border needed)
+        const newBounds = {
+          x: originalWindowBounds.x,
+          y: originalWindowBounds.y,
+          width: logicalWidth,
+          height: logicalHeight
         };
         
-        console.log(`Visible center: (${visibleCenterX}, ${visibleCenterY}) relative to current window`);
-        console.log(`Crop info:`, cropInfo);
+        await ipcRenderer.invoke('set-window-bounds', newBounds);
         
-        // Execute the crop
-        const result = await ipcRenderer.invoke('crop-to-current-view', cropInfo);
-        
-        if (result.success) {
-          // Update the background position to show the cropped area correctly
-          content.style.backgroundPosition = `${newBackgroundX}px ${newBackgroundY}px`;
-          
-          // Update image offset tracking
-          imageOffset = { x: newBackgroundX, y: newBackgroundY };
-          
-          console.log(`Window cropped successfully to ${result.newBounds.width}x${result.newBounds.height}`);
-          console.log(`New background position: ${newBackgroundX}px, ${newBackgroundY}px`);
-        } else {
-          console.error('Failed to crop window:', result.error);
-        }
-      } else {
-        console.log('No visible image area to crop to');
-      }
+        console.log(`Image cropped to window content area: ${logicalWidth}x${logicalHeight}px (logical)`);
+        console.log(`Window resized to: ${newBounds.width}x${newBounds.height}px`);
+      };
+      
+      img.onerror = (error) => {
+        console.error('Failed to load image for cropping:', error);
+      };
+      
+      img.src = imageDataUrl;
     } else {
       console.log('No background image to crop');
     }
@@ -359,7 +347,6 @@ ipcRenderer.on('crop-to-view', async () => {
     console.error('Error cropping to current view:', error);
   }
 });
-
 // Menu-triggered transparentize color event
 ipcRenderer.on('transparentize-color', async (event, coords) => {
   console.log('Transparentize color event received in renderer at:', coords);
