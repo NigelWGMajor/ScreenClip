@@ -26,11 +26,14 @@ let originalWindowBounds = null;
 let autoCropTimer = null;
 
 
-// Set initial fade opacity on body when DOM is loaded
+// Set initial fade opacity on .fill when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
-  document.body.classList.add('fade-opacity');
-  document.body.style.setProperty('--fade-opacity', currentOpacity);
-  console.log(`Initial body fade opacity set to: ${currentOpacity}`);
+  const fill = document.querySelector('.fill');
+  if (fill) {
+    fill.classList.add('fade-opacity');
+    fill.style.setProperty('--fade-opacity', currentOpacity);
+    console.log(`Initial .fill fade opacity set to: ${currentOpacity}`);
+  }
 });
 
 
@@ -48,8 +51,8 @@ ipcRenderer.on('toggle-border', () => {
 
 ipcRenderer.on('reset-scale', () => {
   console.log('Reset scale event received in renderer');
-  const body = document.querySelector('body');
-  const backgroundImage = getComputedStyle(body).backgroundImage;
+  const content = document.querySelector('.content');
+  const backgroundImage = getComputedStyle(content).backgroundImage;
   
   if (backgroundImage && backgroundImage !== 'none' && originalImageWidth > 0) {
     // Reset image scale to 1:1
@@ -59,10 +62,10 @@ ipcRenderer.on('reset-scale', () => {
     currentWindowScale = 1.0;
     
     // Apply original image dimensions
-    body.style.backgroundSize = `${originalImageWidth}px ${originalImageHeight}px`;
+    content.style.backgroundSize = `${originalImageWidth}px ${originalImageHeight}px`;
     
     // Reset position to initial screenshot alignment
-    body.style.backgroundPosition = `${originalPositionX}px ${originalPositionY}px`;
+    content.style.backgroundPosition = `${originalPositionX}px ${originalPositionY}px`;
     
     // Update tracking variables
     imageOffset = { x: originalPositionX, y: originalPositionY };
@@ -129,13 +132,14 @@ ipcRenderer.on('menu-load-file', async () => {
       console.log(`Image size: ${result.logicalWidth}x${result.logicalHeight}px`);
       
       // Apply the loaded image as background
+      const content = document.querySelector('.content');
       const body = document.querySelector('body');
-      body.style.backgroundImage = `url(${result.dataUrl})`;
-      body.style.backgroundRepeat = 'no-repeat';
+      content.style.backgroundImage = `url(${result.dataUrl})`;
+      content.style.backgroundRepeat = 'no-repeat';
       
-      // Automatically turn off border and set opacity to 100% when loading
+      // Automatically turn off border and set content opacity to 100% when loading
       body.style.borderColor = 'transparent';
-      body.style.opacity = '1';
+      content.style.opacity = '1';
       currentOpacity = 1.0;
       console.log('Border turned off and opacity set to 100% for loaded image');
       
@@ -147,7 +151,7 @@ ipcRenderer.on('menu-load-file', async () => {
       console.log(`Setting background to loaded image size: ${originalImageWidth}x${originalImageHeight}px`);
       
       // Set background size to image dimensions
-      body.style.backgroundSize = `${originalImageWidth}px ${originalImageHeight}px`;
+      content.style.backgroundSize = `${originalImageWidth}px ${originalImageHeight}px`;
       
       // Resize window to match image dimensions exactly (no border needed since it's transparent)
       try {
@@ -171,7 +175,7 @@ ipcRenderer.on('menu-load-file', async () => {
         
         console.log(`Positioning loaded image at: ${initialX}px, ${initialY}px (no border, perfect fit)`);
         
-        body.style.backgroundPosition = `${initialX}px ${initialY}px`;
+        content.style.backgroundPosition = `${initialX}px ${initialY}px`;
         
         // Store original position for reset functionality
         originalPositionX = initialX;
@@ -239,7 +243,7 @@ ipcRenderer.on('crop-to-view', async () => {
   
   try {
     const body = document.querySelector('body');
-    const backgroundImage = getComputedStyle(body).backgroundImage;
+    const backgroundImage = getComputedStyle(content).backgroundImage;
     
     if (backgroundImage && backgroundImage !== 'none') {
       // Get current window bounds
@@ -330,7 +334,7 @@ ipcRenderer.on('crop-to-view', async () => {
         
         if (result.success) {
           // Update the background position to show the cropped area correctly
-          body.style.backgroundPosition = `${newBackgroundX}px ${newBackgroundY}px`;
+          content.style.backgroundPosition = `${newBackgroundX}px ${newBackgroundY}px`;
           
           // Update image offset tracking
           imageOffset = { x: newBackgroundX, y: newBackgroundY };
@@ -422,12 +426,12 @@ ipcRenderer.on('transparentize-color', async (event, coords) => {
           
           // Update the background image
           const body = document.querySelector('body');
-          body.style.backgroundImage = `url(${processedDataUrl})`;
+          content.style.backgroundImage = `url(${processedDataUrl})`;
           
           // Reset scaling and positioning to fit the new image
-          body.style.backgroundSize = `${result.logicalWidth}px ${result.logicalHeight}px`;
-          body.style.backgroundPosition = '2px 2px'; // Account for border
-          body.style.backgroundRepeat = 'no-repeat';
+          content.style.backgroundSize = `${result.logicalWidth}px ${result.logicalHeight}px`;
+          content.style.backgroundPosition = '2px 2px'; // Account for border
+          content.style.backgroundRepeat = 'no-repeat';
           
           // Reset image tracking variables
           currentImageScale = 1.0;
@@ -540,12 +544,12 @@ ipcRenderer.on('transparentize-color-custom', async (event, coords) => {
               
               // Update the background image
               const body = document.querySelector('body');
-              body.style.backgroundImage = `url(${processedDataUrl})`;
+              content.style.backgroundImage = `url(${processedDataUrl})`;
               
               // Reset scaling and positioning to fit the new image
-              body.style.backgroundSize = `${result.logicalWidth}px ${result.logicalHeight}px`;
-              body.style.backgroundPosition = '2px 2px'; // Account for border
-              body.style.backgroundRepeat = 'no-repeat';
+              content.style.backgroundSize = `${result.logicalWidth}px ${result.logicalHeight}px`;
+              content.style.backgroundPosition = '2px 2px'; // Account for border
+              content.style.backgroundRepeat = 'no-repeat';
               
               // Reset image tracking variables
               currentImageScale = 1.0;
@@ -611,14 +615,16 @@ document.addEventListener('wheel', (event) => {
     // ...existing code for image scaling...
     // (leave unchanged)
   } else {
-    // Normal wheel: Adjust fade opacity of body only
+    // Normal wheel: Adjust opacity of .content div (which contains the image)
     // Up (deltaY < 0): more opaque, Down (deltaY > 0): more transparent
+    const content = document.querySelector('.content');
     const delta = event.deltaY < 0 ? 0.05 : -0.05;
     currentOpacity += delta;
     currentOpacity = Math.max(0.05, Math.min(1.0, currentOpacity));
-    document.body.classList.add('fade-opacity');
-    document.body.style.setProperty('--fade-opacity', currentOpacity);
-    console.log(`body fade opacity adjusted to: ${currentOpacity.toFixed(2)}`);
+    if (content) {
+      content.style.opacity = currentOpacity;
+      console.log(`.content opacity adjusted to: ${currentOpacity.toFixed(2)}`);
+    }
   }
 });
 
@@ -640,15 +646,15 @@ document.addEventListener('dblclick', async (event) => {
       const scaleFactor = cropInfo.scaleFactor;
       
       // Apply the FULL screenshot as background image (not cropped)
-      const body = document.querySelector('body');
-      body.style.backgroundImage = `url(${cropInfo.fullScreenshot})`;
-      body.style.backgroundRepeat = 'no-repeat';
+      const content = document.querySelector('.content');
+      content.style.backgroundImage = `url(${cropInfo.fullScreenshot})`;
+      content.style.backgroundRepeat = 'no-repeat';
       
       // Scale the image to display at 1:1 scale (actual screen size in CSS pixels)
       // The screenshot is in physical pixels, so we need to scale it down by the scale factor
       const actualScreenWidth = cropInfo.screenshotSize.width / scaleFactor;
       const actualScreenHeight = cropInfo.screenshotSize.height / scaleFactor;
-      body.style.backgroundSize = `${actualScreenWidth}px ${actualScreenHeight}px`;
+      content.style.backgroundSize = `${actualScreenWidth}px ${actualScreenHeight}px`;
       
       // Store original dimensions for scaling
       originalImageWidth = actualScreenWidth;
@@ -660,7 +666,7 @@ document.addEventListener('dblclick', async (event) => {
       const initialX = -Math.floor(cropInfo.windowX / scaleFactor) - 2;
       const initialY = -Math.floor(cropInfo.windowY / scaleFactor) - 2;
       
-      body.style.backgroundPosition = `${initialX}px ${initialY}px`;
+      content.style.backgroundPosition = `${initialX}px ${initialY}px`;
       
       // Store original position for reset functionality
       originalPositionX = initialX;
@@ -691,7 +697,7 @@ document.addEventListener('dblclick', async (event) => {
       console.log(`- Original window bounds:`, originalWindowBounds);
       
       // Test if the background image was actually set
-      const appliedBg = getComputedStyle(body).backgroundImage;
+      const appliedBg = getComputedStyle(content).backgroundImage;
       console.log('Background image applied:', appliedBg !== 'none' ? 'YES' : 'NO');
       
     } else {
@@ -728,7 +734,7 @@ document.addEventListener('mousedown', async (event) => {
   } else if (event.button === 2) {
     // Right-click: Image drag (only if there's a background image)
     const body = document.querySelector('body');
-    const backgroundImage = getComputedStyle(body).backgroundImage;
+    const backgroundImage = getComputedStyle(content).backgroundImage;
     
     if (backgroundImage && backgroundImage !== 'none') {
       isDragging = true;
@@ -766,7 +772,7 @@ document.addEventListener('mousemove', async (event) => {
         imageOffset.y = dragInfo.initialOffsetY + deltaY;
         
         const body = document.querySelector('body');
-        body.style.backgroundPosition = `${imageOffset.x}px ${imageOffset.y}px`;
+        content.style.backgroundPosition = `${imageOffset.x}px ${imageOffset.y}px`;
         
         console.log(`Image offset: ${imageOffset.x}, ${imageOffset.y}`);
       }
@@ -847,10 +853,10 @@ document.addEventListener('keydown', async (event) => {
     console.log('Ctrl+C detected, copying current window view to clipboard...');
     
     try {
-      // Temporarily set opacity to 1 for the capture
-      const body = document.querySelector('body');
-      const originalOpacity = body.style.opacity;
-      body.style.opacity = '1';
+      // Temporarily set content opacity to 1 for the capture
+      const content = document.querySelector('.content');
+      const originalOpacity = content.style.opacity;
+      content.style.opacity = '1';
       
       // Wait a moment for the opacity change to take effect
       await new Promise(resolve => setTimeout(resolve, 50));
@@ -859,7 +865,7 @@ document.addEventListener('keydown', async (event) => {
       const success = await ipcRenderer.invoke('copy-to-clipboard');
       
       // Restore original opacity
-      body.style.opacity = originalOpacity;
+      content.style.opacity = originalOpacity;
       
       if (success) {
         console.log('Current window view successfully copied to clipboard!');
@@ -869,9 +875,9 @@ document.addEventListener('keydown', async (event) => {
     } catch (error) {
       console.error('Error copying to clipboard:', error);
       
-      // Restore opacity even if there was an error
-      const body = document.querySelector('body');
-      body.style.opacity = currentOpacity;
+      // Restore content opacity even if there was an error
+      const content = document.querySelector('.content');
+      content.style.opacity = currentOpacity;
     }
   }
   // Check for Ctrl+V (paste image from clipboard)
@@ -890,13 +896,14 @@ document.addEventListener('keydown', async (event) => {
         console.log(`Scale factor: ${clipboardData.scaleFactor || 'unknown'}`);
         
         // Apply the pasted image as background
+        const content = document.querySelector('.content');
         const body = document.querySelector('body');
-        body.style.backgroundImage = `url(${clipboardData.dataUrl})`;
-        body.style.backgroundRepeat = 'no-repeat';
+        content.style.backgroundImage = `url(${clipboardData.dataUrl})`;
+        content.style.backgroundRepeat = 'no-repeat';
         
-        // Automatically turn off border and set opacity to 100% when pasting
+        // Automatically turn off border and set content opacity to 100% when pasting
         body.style.borderColor = 'transparent';
-        body.style.opacity = '1';
+        content.style.opacity = '1';
         currentOpacity = 1.0;
         console.log('Border turned off and opacity set to 100% for pasted image');
         
@@ -908,7 +915,7 @@ document.addEventListener('keydown', async (event) => {
         console.log(`Setting background to logical size: ${originalImageWidth}x${originalImageHeight}px`);
         
         // Set background size to logical image dimensions
-        body.style.backgroundSize = `${originalImageWidth}px ${originalImageHeight}px`;
+        content.style.backgroundSize = `${originalImageWidth}px ${originalImageHeight}px`;
         
         // Resize window to match image dimensions exactly (no border needed since it's transparent)
         try {
@@ -932,7 +939,7 @@ document.addEventListener('keydown', async (event) => {
           
           console.log(`Positioning image at: ${initialX}px, ${initialY}px (no border, perfect fit)`);
           
-          body.style.backgroundPosition = `${initialX}px ${initialY}px`;
+          content.style.backgroundPosition = `${initialX}px ${initialY}px`;
           
           // Store original position for reset functionality
           originalPositionX = initialX;
@@ -959,7 +966,7 @@ document.addEventListener('keydown', async (event) => {
           const initialX = Math.round((currentBounds.width - originalImageWidth) / 2);
           const initialY = Math.round((currentBounds.height - originalImageHeight) / 2);
           
-          body.style.backgroundPosition = `${initialX}px ${initialY}px`;
+          content.style.backgroundPosition = `${initialX}px ${initialY}px`;
           originalPositionX = initialX;
           originalPositionY = initialY;
           imageOffset = { x: initialX, y: initialY };
@@ -1042,12 +1049,13 @@ document.addEventListener('DOMContentLoaded', () => {
             console.log(`Dropped image size: ${img.width}x${img.height}px`);
             
             // Apply the dropped image as background
-            body.style.backgroundImage = `url(${dataUrl})`;
-            body.style.backgroundRepeat = 'no-repeat';
+            content.style.backgroundImage = `url(${dataUrl})`;
+            content.style.backgroundRepeat = 'no-repeat';
             
-            // Automatically turn off border and set opacity to 100% when dropping
+            // Automatically turn off border and set content opacity to 100% when dropping
+            const content = document.querySelector('.content');
             body.style.borderColor = 'transparent';
-            body.style.opacity = '1';
+            content.style.opacity = '1';
             currentOpacity = 1.0;
             console.log('Border turned off and opacity set to 100% for dropped image');
             
@@ -1059,7 +1067,7 @@ document.addEventListener('DOMContentLoaded', () => {
             console.log(`Setting background to dropped image size: ${originalImageWidth}x${originalImageHeight}px`);
             
             // Set background size to image dimensions
-            body.style.backgroundSize = `${originalImageWidth}px ${originalImageHeight}px`;
+            content.style.backgroundSize = `${originalImageWidth}px ${originalImageHeight}px`;
             
             // Resize window to match image dimensions exactly (no border needed since it's transparent)
             try {
@@ -1083,7 +1091,7 @@ document.addEventListener('DOMContentLoaded', () => {
               
               console.log(`Positioning dropped image at: ${initialX}px, ${initialY}px (no border, perfect fit)`);
               
-              body.style.backgroundPosition = `${initialX}px ${initialY}px`;
+              content.style.backgroundPosition = `${initialX}px ${initialY}px`;
               
               // Store original position for reset functionality
               originalPositionX = initialX;
@@ -1121,7 +1129,7 @@ document.addEventListener('DOMContentLoaded', () => {
 async function triggerCropToCurrentView() {
   try {
     const body = document.querySelector('body');
-    const backgroundImage = getComputedStyle(body).backgroundImage;
+    const backgroundImage = getComputedStyle(content).backgroundImage;
     
     if (backgroundImage && backgroundImage !== 'none') {
       // Get current window bounds
@@ -1199,7 +1207,7 @@ async function triggerCropToCurrentView() {
         
         if (result.success) {
           // Update the background position to show the cropped area correctly
-          body.style.backgroundPosition = `${newBackgroundX}px ${newBackgroundY}px`;
+          content.style.backgroundPosition = `${newBackgroundX}px ${newBackgroundY}px`;
           
           // Update image offset tracking
           imageOffset = { x: newBackgroundX, y: newBackgroundY };

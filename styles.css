@@ -11,14 +11,14 @@ html, body {
 }
 
 body {
-  background: rgba(0,0,0,0.05); /* Always at least 5% opaque for mouse hits */
+  background: transparent;
   box-sizing: border-box;
-  transition: opacity 0.2s, background 0.2s;
 }
 
-body.fade-opacity {
-  /* This class will be set dynamically for fading */
-  opacity: var(--fade-opacity, 0.15);
+.content {
+  width: 100%;
+  height: 100%;
+  background: transparent;
 }
 
 body::before {
@@ -31,8 +31,19 @@ body::before {
   border-radius: 0;
 }
 
+.fill {
+  width: 100%;
+  height: 100%;
+  background: rgba(0,0,0,0.05); /* Always at least 5% opaque for mouse hits */
+  transition: opacity 0.2s, background 0.2s;
+}
+
+.fill.fade-opacity {
+  opacity: var(--fade-opacity, 0.15);
+}
+
 #app {
   width: 100%;
   height: 100%;
-  /* No opacity or background here, handled by body */
+  /* No opacity or background here, handled by .fill */
 }
