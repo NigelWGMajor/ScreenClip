@@ -406,15 +406,13 @@ ipcMain.handle('copy-to-clipboard', async (event) => {
     const currentDisplay = screen.getDisplayNearestPoint({ x: windowCenterX, y: windowCenterY });
     const scaleFactor = currentDisplay.scaleFactor;
     
-    // Capture the current window contents excluding the 2px border
-    const borderWidth = 2;
-    
-    // Calculate capture area in logical pixels (capturePage uses logical coordinates)
+    // Capture the entire window contents including border area
+    // This ensures copy-paste cycles maintain exact window dimensions
     const captureArea = {
-      x: borderWidth,
-      y: borderWidth,
-      width: bounds.width - (borderWidth * 2),
-      height: bounds.height - (borderWidth * 2)
+      x: 0,
+      y: 0,
+      width: bounds.width,
+      height: bounds.height
     };
     
     // Force exact pixel boundaries to prevent rounding accumulation
@@ -428,7 +426,7 @@ ipcMain.handle('copy-to-clipboard', async (event) => {
     const expectedDeviceWidth = Math.round(captureArea.width * scaleFactor);
     const expectedDeviceHeight = Math.round(captureArea.height * scaleFactor);
     
-    console.log(`Current window content copied to clipboard (excluding ${borderWidth}px border)`);
+    console.log(`Current window content copied to clipboard (including entire window area)`);
     console.log(`Display scale factor: ${scaleFactor}`);
     console.log(`Logical capture area: ${captureArea.width}x${captureArea.height}px at (${captureArea.x}, ${captureArea.y})`);
     console.log(`Captured image size: ${imageSize.width}x${imageSize.height}px`);
@@ -441,8 +439,8 @@ ipcMain.handle('copy-to-clipboard', async (event) => {
     return {
       success: true,
       scaleFactor: scaleFactor,
-      logicalWidth: captureArea.width,  // This is the actual content size (without border)
-      logicalHeight: captureArea.height, // This is the actual content size (without border)
+      logicalWidth: captureArea.width,  // This is the entire window size (including border area)
+      logicalHeight: captureArea.height, // This is the entire window size (including border area)
       capturedWidth: imageSize.width,
       capturedHeight: imageSize.height
     };

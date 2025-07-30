@@ -430,16 +430,16 @@ ipcRenderer.on('transparentize-color', async (event, coords) => {
           
           // Reset scaling and positioning to fit the new image
           content.style.backgroundSize = `${result.logicalWidth}px ${result.logicalHeight}px`;
-          content.style.backgroundPosition = '2px 2px'; // Account for border
+          content.style.backgroundPosition = '0px 0px'; // Perfect alignment
           content.style.backgroundRepeat = 'no-repeat';
           
           // Reset image tracking variables
           currentImageScale = 1.0;
           originalImageWidth = result.logicalWidth;
           originalImageHeight = result.logicalHeight;
-          originalPositionX = 2;
-          originalPositionY = 2;
-          imageOffset = { x: 2, y: 2 };
+          originalPositionX = 0;
+          originalPositionY = 0;
+          imageOffset = { x: 0, y: 0 };
           
           console.log(`Transparentized color RGB(${targetR}, ${targetG}, ${targetB}) with tolerance ${tolerance}`);
           console.log(`Processed image size: ${result.logicalWidth}x${result.logicalHeight}px`);
@@ -548,16 +548,16 @@ ipcRenderer.on('transparentize-color-custom', async (event, coords) => {
               
               // Reset scaling and positioning to fit the new image
               content.style.backgroundSize = `${result.logicalWidth}px ${result.logicalHeight}px`;
-              content.style.backgroundPosition = '2px 2px'; // Account for border
+              content.style.backgroundPosition = '0px 0px'; // Perfect alignment
               content.style.backgroundRepeat = 'no-repeat';
               
               // Reset image tracking variables
               currentImageScale = 1.0;
               originalImageWidth = result.logicalWidth;
               originalImageHeight = result.logicalHeight;
-              originalPositionX = 2;
-              originalPositionY = 2;
-              imageOffset = { x: 2, y: 2 };
+              originalPositionX = 0;
+              originalPositionY = 0;
+              imageOffset = { x: 0, y: 0 };
               
               console.log(`Transparentized color RGB(${targetR}, ${targetG}, ${targetB}) with custom tolerance ${tolerance}`);
               console.log(`Processed image size: ${result.logicalWidth}x${result.logicalHeight}px`);
@@ -661,10 +661,9 @@ document.addEventListener('dblclick', async (event) => {
       originalImageHeight = actualScreenHeight;
       currentImageScale = 1.0; // Reset scale to 1:1
       
-      // Position the image so the window area appears centered initially
-      // Apply a manual 2px compensation to counteract the consistent offset (move up and left)
-      const initialX = -Math.floor(cropInfo.windowX / scaleFactor) - 2;
-      const initialY = -Math.floor(cropInfo.windowY / scaleFactor) - 2;
+      // Position the image so the window area appears exactly where it was captured
+      const initialX = -Math.floor(cropInfo.windowX / scaleFactor);
+      const initialY = -Math.floor(cropInfo.windowY / scaleFactor);
       
       content.style.backgroundPosition = `${initialX}px ${initialY}px`;
       

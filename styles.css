@@ -1,5 +1,5 @@
 body.border-hidden::before {
-  border-color: transparent !important;
+  opacity: 0 !important;
 }
 
 html, body {
