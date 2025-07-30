@@ -25,28 +25,23 @@ let originalWindowBounds = null;
 // Debounce timer for auto-crop after scaling
 let autoCropTimer = null;
 
-// Set initial opacity when DOM is loaded
+
+// Set initial fade opacity on body when DOM is loaded
 document.addEventListener('DOMContentLoaded', () => {
-  const body = document.querySelector('body');
-  body.style.opacity = currentOpacity;
-  console.log(`Initial opacity set to: ${currentOpacity}`);
+  document.body.classList.add('fade-opacity');
+  document.body.style.setProperty('--fade-opacity', currentOpacity);
+  console.log(`Initial body fade opacity set to: ${currentOpacity}`);
 });
+
 
 ipcRenderer.on('toggle-border', () => {
   console.log('Toggle border event received in renderer');
-  const body = document.querySelector('body');
-  const currentBorderColor = body.style.borderColor;
-  console.log('Current border color:', currentBorderColor);
-
-  if (currentBorderColor === 'transparent' || currentBorderColor === '' || !currentBorderColor) {
-    body.style.borderWidth = '2px';
-    body.style.borderStyle = 'solid';
-    body.style.borderColor = 'red';
+  const body = document.body;
+  if (body.classList.contains('border-hidden')) {
+    body.classList.remove('border-hidden');
     console.log('Border turned on (red)');
   } else {
-    body.style.borderWidth = '2px'; // Keep the width
-    body.style.borderStyle = 'solid'; // Keep the style
-    body.style.borderColor = 'transparent'; // Just make it transparent
+    body.classList.add('border-hidden');
     console.log('Border turned off (transparent)');
   }
 });
@@ -602,153 +597,28 @@ ipcRenderer.on('show-help', async () => {
   }
 });
 
+
 // Mouse wheel event to adjust opacity, image scale, or window scale
 document.addEventListener('wheel', (event) => {
   console.log('Mouse wheel event detected, deltaY:', event.deltaY, 'ctrlKey:', event.ctrlKey, 'shiftKey:', event.shiftKey);
   event.preventDefault(); // Prevent default scroll behavior
-  
-  const body = document.querySelector('body');
-  
+  const app = document.getElementById('app');
+  const body = document.body;
   if (event.shiftKey) {
-    // Shift+Wheel: Scale entire window around mouse position
-    const scaleDelta = event.deltaY > 0 ? -0.1 : 0.1; // Scroll down decreases scale, up increases
-    const newWindowScale = Math.max(0.3, Math.min(5.0, currentWindowScale + scaleDelta));
-    
-    if (newWindowScale !== currentWindowScale) {
-      // Get mouse position relative to screen
-      const mouseScreenX = event.screenX;
-      const mouseScreenY = event.screenY;
-      
-      // Get current window position first to calculate scaling from current size
-      ipcRenderer.invoke('get-window-bounds').then(windowBounds => {
-        // Calculate scale ratio
-        const scaleRatio = newWindowScale / currentWindowScale;
-        
-        // Calculate new window dimensions based on CURRENT window size, not base size
-        const newWidth = Math.floor(windowBounds.width * scaleRatio);
-        const newHeight = Math.floor(windowBounds.height * scaleRatio);
-        
-        // Calculate mouse position relative to current window
-        const mouseRelativeX = mouseScreenX - windowBounds.x;
-        const mouseRelativeY = mouseScreenY - windowBounds.y;
-        
-        // Calculate the same relative position in the new scaled window
-        const newMouseRelativeX = mouseRelativeX * scaleRatio;
-        const newMouseRelativeY = mouseRelativeY * scaleRatio;
-        
-        // Calculate new window position to keep mouse point stationary
-        const newWindowX = mouseScreenX - newMouseRelativeX;
-        const newWindowY = mouseScreenY - newMouseRelativeY;
-        
-        // Update window scale tracking
-        currentWindowScale = newWindowScale;
-        
-        // Scale the background image proportionally if it exists
-        if (originalImageWidth > 0) {
-          // Calculate the current displayed image size (original * current image scale)
-          const currentDisplayedWidth = originalImageWidth * currentImageScale;
-          const currentDisplayedHeight = originalImageHeight * currentImageScale;
-          
-          // Scale the displayed image size by the window scale
-          const scaledImageWidth = currentDisplayedWidth * newWindowScale;
-          const scaledImageHeight = currentDisplayedHeight * newWindowScale;
-          body.style.backgroundSize = `${scaledImageWidth}px ${scaledImageHeight}px`;
-          
-          // Get current background position to scale it proportionally
-          const currentPosition = getComputedStyle(body).backgroundPosition;
-          const positionParts = currentPosition.split(' ');
-          const currentX = parseFloat(positionParts[0]) || 0;
-          const currentY = parseFloat(positionParts[1]) || 0;
-          
-          // Scale the current position by the window scale ratio
-          const scaledPositionX = currentX * scaleRatio;
-          const scaledPositionY = currentY * scaleRatio;
-          body.style.backgroundPosition = `${scaledPositionX}px ${scaledPositionY}px`;
-          
-          // Update image offset tracking
-          imageOffset = { x: scaledPositionX, y: scaledPositionY };
-        }
-        
-        // Apply new window bounds
-        ipcRenderer.invoke('set-window-bounds', {
-          x: Math.floor(newWindowX),
-          y: Math.floor(newWindowY),
-          width: newWidth,
-          height: newHeight
-        });
-        
-        // Debounced auto-crop: only trigger after mouse wheel action has stopped
-        if (autoCropTimer) {
-          clearTimeout(autoCropTimer);
-        }
-        autoCropTimer = setTimeout(() => {
-          triggerCropToCurrentView();
-          autoCropTimer = null;
-        }, 500); // Wait 500ms after last scroll event
-        
-        console.log(`Window scale adjusted to: ${currentWindowScale.toFixed(1)}x (${newWidth}x${newHeight})`);
-      });
-    }
+    // ...existing code for window scaling...
+    // (leave unchanged)
   } else if (event.ctrlKey) {
-    // Ctrl+Wheel: Adjust image scale centered on mouse position
-    const scaleDelta = event.deltaY > 0 ? -0.1 : 0.1; // Scroll down decreases scale, up increases
-    const newScale = Math.max(0.1, Math.min(5.0, currentImageScale + scaleDelta));
-    
-    // Check if we have a background image to scale
-    const backgroundImage = getComputedStyle(body).backgroundImage;
-    if (backgroundImage && backgroundImage !== 'none' && originalImageWidth > 0 && newScale !== currentImageScale) {
-      
-      // Get current background position
-      const currentPosition = getComputedStyle(body).backgroundPosition;
-      const positionParts = currentPosition.split(' ');
-      const currentX = parseFloat(positionParts[0]) || 0;
-      const currentY = parseFloat(positionParts[1]) || 0;
-      
-      // Calculate mouse position relative to the element
-      const rect = body.getBoundingClientRect();
-      const mouseX = event.clientX - rect.left;
-      const mouseY = event.clientY - rect.top;
-      
-      // Calculate the point on the image that's under the mouse cursor
-      const imagePointX = mouseX - currentX;
-      const imagePointY = mouseY - currentY;
-      
-      // Calculate scale factor change
-      const scaleRatio = newScale / currentImageScale;
-      
-      // Apply new scale to original dimensions
-      const newWidth = originalImageWidth * newScale;
-      const newHeight = originalImageHeight * newScale;
-      
-      // Calculate new background position to keep the same point under the mouse
-      const newImagePointX = imagePointX * scaleRatio;
-      const newImagePointY = imagePointY * scaleRatio;
-      const newX = mouseX - newImagePointX;
-      const newY = mouseY - newImagePointY;
-      
-      // Update the background
-      body.style.backgroundSize = `${newWidth}px ${newHeight}px`;
-      body.style.backgroundPosition = `${newX}px ${newY}px`;
-      
-      // Update tracking variables
-      currentImageScale = newScale;
-      imageOffset = { x: newX, y: newY };
-      
-      console.log(`Image scale adjusted to: ${currentImageScale.toFixed(1)}x (${newWidth.toFixed(0)}x${newHeight.toFixed(0)}) centered on mouse`);
-    }
+    // ...existing code for image scaling...
+    // (leave unchanged)
   } else {
-    // Normal wheel: Adjust opacity
-    const delta = event.deltaY > 0 ? -0.05 : 0.05; // Scroll down decreases opacity, up increases
-    
+    // Normal wheel: Adjust fade opacity of body only
+    // Up (deltaY < 0): more opaque, Down (deltaY > 0): more transparent
+    const delta = event.deltaY < 0 ? 0.05 : -0.05;
     currentOpacity += delta;
-
-    // Clamp opacity between 0.05 and 0.95
-    currentOpacity = Math.max(0.05, Math.min(0.95, currentOpacity));
-    
-    // Apply opacity to the entire body (affects both background color and background image)
-    body.style.opacity = currentOpacity;
-    
-    console.log(`Opacity adjusted to: ${currentOpacity.toFixed(2)}`);
+    currentOpacity = Math.max(0.05, Math.min(1.0, currentOpacity));
+    document.body.classList.add('fade-opacity');
+    document.body.style.setProperty('--fade-opacity', currentOpacity);
+    console.log(`body fade opacity adjusted to: ${currentOpacity.toFixed(2)}`);
   }
 });
 

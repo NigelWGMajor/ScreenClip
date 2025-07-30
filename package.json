@@ -23,7 +23,7 @@
       "renderer.js",
       "preload.js",
       "index.html",
-      "style.css",
+      "styles.css",
       "package.json"
     ],
     "win": {
