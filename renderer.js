@@ -143,14 +143,19 @@ ipcRenderer.on('menu-load-file', async () => {
       currentOpacity = 1.0;
       console.log('Border turned off and opacity set to 100% for loaded image');
       
-      // Use the loaded image dimensions
-      originalImageWidth = result.logicalWidth;
-      originalImageHeight = result.logicalHeight;
+      // Get current display scale factor to handle DPI correctly
+      const displayInfo = await ipcRenderer.invoke('get-display-info');
+      const scaleFactor = displayInfo.scaleFactor;
+      
+      // For loaded files, the dimensions are actual pixel dimensions, not DPI-adjusted
+      // We need to scale them to logical pixels for proper display
+      originalImageWidth = Math.round(result.logicalWidth / scaleFactor);
+      originalImageHeight = Math.round(result.logicalHeight / scaleFactor);
       currentImageScale = 1.0; // Reset scale to 1:1
       
-      console.log(`Setting background to loaded image size: ${originalImageWidth}x${originalImageHeight}px`);
+      console.log(`Loading image: ${result.logicalWidth}x${result.logicalHeight}px actual, ${originalImageWidth}x${originalImageHeight}px logical (scale: ${scaleFactor})`);
       
-      // Set background size to image dimensions
+      // Set background size to logical dimensions for proper DPI handling
       content.style.backgroundSize = `${originalImageWidth}px ${originalImageHeight}px`;
       
       // Resize window to match image dimensions exactly (no border needed since it's transparent)
@@ -1058,14 +1063,19 @@ document.addEventListener('DOMContentLoaded', () => {
             currentOpacity = 1.0;
             console.log('Border turned off and opacity set to 100% for dropped image');
             
-            // Use the dropped image dimensions
-            originalImageWidth = img.width;
-            originalImageHeight = img.height;
+            // Get current display scale factor to handle DPI correctly
+            const displayInfo = await ipcRenderer.invoke('get-display-info');
+            const scaleFactor = displayInfo.scaleFactor;
+            
+            // For dropped files, the dimensions are actual pixel dimensions, not DPI-adjusted
+            // We need to scale them to logical pixels for proper display
+            originalImageWidth = Math.round(img.width / scaleFactor);
+            originalImageHeight = Math.round(img.height / scaleFactor);
             currentImageScale = 1.0; // Reset scale to 1:1
             
-            console.log(`Setting background to dropped image size: ${originalImageWidth}x${originalImageHeight}px`);
+            console.log(`Dropping image: ${img.width}x${img.height}px actual, ${originalImageWidth}x${originalImageHeight}px logical (scale: ${scaleFactor})`);
             
-            // Set background size to image dimensions
+            // Set background size to logical dimensions for proper DPI handling
             content.style.backgroundSize = `${originalImageWidth}px ${originalImageHeight}px`;
             
             // Resize window to match image dimensions exactly (no border needed since it's transparent)
