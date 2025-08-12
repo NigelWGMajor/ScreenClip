@@ -1,9 +1,18 @@
-const { app, BrowserWindow, Menu, ipcMain, screen, nativeImage, desktopCapturer, clipboard, dialog } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, screen, nativeImage, desktopCapturer, clipboard, dialog, protocol } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
 let mainWindow;
 let windows = []; // Array to track all windows
+
+// Register a custom protocol to serve local files for Tesseract
+app.whenReady().then(() => {
+  protocol.registerFileProtocol('tesseract', (request, callback) => {
+    const url = request.url.substr(11); // Remove 'tesseract://' prefix
+    const filePath = path.join(__dirname, url);
+    callback({ path: filePath });
+  });
+});
 
 function createWindow() {
   const newWindow = new BrowserWindow({
@@ -127,6 +136,19 @@ function createWindow() {
           }
         }
       ]
+    },
+    { type: 'separator' },
+    {
+      label: 'Extract Text (OCR)',
+      click: () => {
+        newWindow.webContents.send('perform-ocr');
+      }
+    },
+    {
+      label: 'Invert Colors (Ctrl+I)',
+      click: () => {
+        newWindow.webContents.send('invert-colors');
+      }
     },
     { type: 'separator' },
     {
@@ -839,6 +861,9 @@ CONTROLS:
 • Right Click: Open context menu with all features
 • Right Double-Click: Create new window
 • Left Double-Click: Capture screenshot
+• Ctrl+C: Copy current view to clipboard
+• Ctrl+V: Paste image from clipboard
+• Ctrl+I: Invert image colors (helps with OCR on dark backgrounds)
 
 CONTEXT MENU:
 • Copy/Paste: Clipboard operations with DPI awareness
@@ -849,6 +874,7 @@ CONTEXT MENU:
 • Transparentize Color: Remove backgrounds with tolerance control
   - Multiple tolerance levels from precise to broad matching
   - Custom tolerance input for exact control
+• Extract Text (OCR): Extract text from visible image portion to clipboard
 • New Window: Create additional window for parallel workflows
 • Close Window: Close current window
 • Close All Windows: Close all open ScreenClip windows

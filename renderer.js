@@ -2,6 +2,13 @@ console.log('Renderer process loaded');
 
 // Using direct ipcRenderer since contextIsolation is disabled
 const { ipcRenderer } = require('electron');
+const Tesseract = require('tesseract.js');
+
+// Configure Tesseract for Electron environment
+const path = require('path');
+
+// Set up Tesseract with better configuration for Electron
+Tesseract.setLogging(true);
 
 // Initial opacity value (15% to match CSS)
 let currentOpacity = 0.15;
@@ -21,6 +28,10 @@ const baseWindowHeight = 800;
 
 // Track original window state for reset functionality
 let originalWindowBounds = null;
+
+// Track OCR state
+let hasOCRText = false;
+let lastOCRText = '';
 
 // Debounce timer for auto-crop after scaling
 let autoCropTimer = null;
@@ -67,6 +78,9 @@ function updateCursor(event) {
   if (!hasImage) {
     // No image loaded yet - show default cursor
     body.style.cursor = 'default';
+  } else if (hasOCRText) {
+    // OCR text is available - show text cursor
+    body.style.cursor = 'text';
   } else if (shiftPressed && ctrlPressed) {
     // Both modifiers: grabbing cursor (window and image together)
     body.style.cursor = 'grabbing';
@@ -216,6 +230,10 @@ ipcRenderer.on('menu-load-file', async () => {
       
       // Update cursor now that we have image content
       updateCursor();
+      
+      // Clear any previous OCR text since we loaded a new image
+      hasOCRText = false;
+      lastOCRText = '';
       
       // Get current display scale factor to handle DPI correctly
       const displayInfo = await ipcRenderer.invoke('get-display-info');
@@ -667,6 +685,58 @@ ipcRenderer.on('show-help', async () => {
   }
 });
 
+// Menu-triggered OCR event
+ipcRenderer.on('perform-ocr', async () => {
+  console.log('OCR event received in renderer');
+  
+  try {
+    console.log('Starting OCR process...');
+    const result = await performOCR();
+    console.log('OCR result:', result);
+    
+    if (result.success) {
+      console.log('OCR completed successfully');
+      console.log('Extracted text:', result.text);
+      console.log(`OCR confidence: ${result.confidence}%`);
+      
+      // Store OCR results
+      hasOCRText = true;
+      lastOCRText = result.text;
+      
+      // Copy text to clipboard
+      navigator.clipboard.writeText(result.text).then(() => {
+        console.log('OCR text copied to clipboard');
+        console.log(`Text length: ${result.text.length} characters`);
+        
+        // Update cursor to indicate text is available
+        updateCursor();
+        
+      }).catch(err => {
+        console.error('Failed to copy OCR text to clipboard:', err);
+        // Still update cursor even if clipboard copy failed
+        updateCursor();
+      });
+    } else {
+      console.error('OCR failed:', result.error);
+      alert(`OCR failed: ${result.error}`);
+    }
+  } catch (error) {
+    console.error('Error performing OCR:', error);
+    alert(`OCR error: ${error.message}`);
+  }
+});
+
+// Menu-triggered invert colors event
+ipcRenderer.on('invert-colors', async () => {
+  console.log('Invert colors event received in renderer');
+  
+  try {
+    await invertImageColors();
+  } catch (error) {
+    console.error('Error inverting image colors:', error);
+  }
+});
+
 // Handle window movement (from border dragging or other window operations)
 ipcRenderer.on('window-moved', (event, { deltaX, deltaY }) => {
   // Only adjust image if we're not currently in a custom drag operation
@@ -784,6 +854,10 @@ document.addEventListener('dblclick', async (event) => {
       
       // Update cursor now that we have image content
       updateCursor();
+      
+      // Clear any previous OCR text since we have a new screenshot
+      hasOCRText = false;
+      lastOCRText = '';
       
     } else {
       console.error('Failed to capture screenshot - cropInfo is null or missing fullScreenshot');
@@ -1028,6 +1102,20 @@ document.addEventListener('mouseup', (event) => {
   }
 });
 
+// Click handler for when OCR text is available (text cursor is active)
+document.addEventListener('click', (event) => {
+  // Only handle clicks when OCR text is available and no modifiers are pressed
+  if (hasOCRText && !event.shiftKey && !event.ctrlKey && !isDragging) {
+    console.log('Clicking with text cursor - copying OCR text to clipboard again');
+    navigator.clipboard.writeText(lastOCRText).then(() => {
+      console.log('OCR text re-copied to clipboard');
+      console.log(`Text: "${lastOCRText.substring(0, 100)}${lastOCRText.length > 100 ? '...' : ''}"`);
+    }).catch(err => {
+      console.error('Failed to re-copy OCR text to clipboard:', err);
+    });
+  }
+});
+
 // Track right-click double-click for new window creation
 let rightClickCount = 0;
 let rightClickTimer = null;
@@ -1133,6 +1221,10 @@ document.addEventListener('keydown', async (event) => {
         // Update cursor now that we have image content
         updateCursor();
         
+        // Clear any previous OCR text since we pasted a new image
+        hasOCRText = false;
+        lastOCRText = '';
+        
         // Use the logical dimensions which should be DPI-adjusted
         originalImageWidth = clipboardData.logicalWidth;
         originalImageHeight = clipboardData.logicalHeight;
@@ -1211,6 +1303,18 @@ document.addEventListener('keydown', async (event) => {
       console.error('Error pasting from clipboard:', error);
     }
   }
+  // Check for Ctrl+I (invert image colors)
+  else if (event.ctrlKey && event.key.toLowerCase() === 'i') {
+    event.preventDefault(); // Prevent default behavior
+    
+    console.log('Ctrl+I detected, inverting image colors...');
+    
+    try {
+      await invertImageColors();
+    } catch (error) {
+      console.error('Error inverting image colors:', error);
+    }
+  }
 });
 
 // Drag and drop support for image files
@@ -1287,6 +1391,10 @@ document.addEventListener('DOMContentLoaded', () => {
             
             // Update cursor now that we have image content
             updateCursor();
+            
+            // Clear any previous OCR text since we dropped a new image
+            hasOCRText = false;
+            lastOCRText = '';
             
             // Get current display scale factor to handle DPI correctly
             const displayInfo = await ipcRenderer.invoke('get-display-info');
@@ -1452,5 +1560,198 @@ async function triggerCropToCurrentView() {
     }
   } catch (error) {
     console.error('Error in auto-crop after scaling:', error);
+  }
+}
+
+// OCR functionality to extract text from visible image portion
+async function performOCR() {
+  try {
+    const content = document.querySelector('.content');
+    const backgroundImage = getComputedStyle(content).backgroundImage;
+    
+    if (!backgroundImage || backgroundImage === 'none') {
+      return { success: false, error: 'No image available for OCR' };
+    }
+    
+    console.log('Starting OCR on visible image portion...');
+    
+    // Get current window bounds to determine visible area
+    const windowBounds = await ipcRenderer.invoke('get-window-bounds');
+    
+    // Create a canvas to capture the visible portion of the image
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    
+    // Set canvas size to window content area (excluding border)
+    const borderWidth = 2;
+    canvas.width = windowBounds.width - (borderWidth * 2);
+    canvas.height = windowBounds.height - (borderWidth * 2);
+    
+    // Create an image element from the background image
+    const imageUrl = backgroundImage.slice(5, -2); // Remove 'url("' and '")'
+    const img = new Image();
+    
+    return new Promise((resolve) => {
+      img.onload = async () => {
+        try {
+          // Get the current background position and size
+          const bgPosition = getComputedStyle(content).backgroundPosition;
+          const bgSize = getComputedStyle(content).backgroundSize;
+          
+          // Parse background position (defaults to "0% 0%" if not set)
+          const positionParts = bgPosition.split(' ');
+          let offsetX = 0, offsetY = 0;
+          
+          if (positionParts.length >= 2) {
+            offsetX = parseFloat(positionParts[0]) || 0;
+            offsetY = parseFloat(positionParts[1]) || 0;
+          }
+          
+          // Parse background size (defaults to image natural size if not set)
+          let drawWidth = img.naturalWidth;
+          let drawHeight = img.naturalHeight;
+          
+          if (bgSize && bgSize !== 'auto' && bgSize !== 'auto auto') {
+            const sizeParts = bgSize.split(' ');
+            if (sizeParts.length >= 2) {
+              drawWidth = parseFloat(sizeParts[0]) || img.naturalWidth;
+              drawHeight = parseFloat(sizeParts[1]) || img.naturalHeight;
+            }
+          }
+          
+          // Draw the visible portion of the image onto the canvas
+          ctx.drawImage(
+            img,
+            0, 0, img.naturalWidth, img.naturalHeight, // Source rectangle (full image)
+            offsetX, offsetY, drawWidth, drawHeight    // Destination rectangle (scaled and positioned)
+          );
+          
+          // Convert canvas to blob for Tesseract
+          canvas.toBlob(async (blob) => {
+            try {
+              console.log('Running OCR with Tesseract...');
+              
+              // Use custom protocol to access local Tesseract files
+              const worker = await Tesseract.createWorker('eng', 1, {
+                workerPath: 'tesseract://worker.min.js',
+                corePath: 'tesseract://tesseract-core.wasm.js',
+                logger: m => {
+                  if (m.status === 'recognizing text') {
+                    console.log(`OCR Progress: ${Math.round(m.progress * 100)}%`);
+                  }
+                }
+              });
+              
+              // Perform OCR using the worker
+              const result = await worker.recognize(blob);
+              
+              // Terminate the worker to free resources
+              await worker.terminate();
+              
+              const extractedText = result.data.text.trim();
+              console.log('OCR completed. Extracted text length:', extractedText.length);
+              
+              resolve({
+                success: true,
+                text: extractedText,
+                confidence: result.data.confidence
+              });
+              
+            } catch (error) {
+              console.error('Tesseract OCR error:', error);
+              resolve({ success: false, error: error.message });
+            }
+          }, 'image/png');
+          
+        } catch (error) {
+          console.error('Canvas processing error:', error);
+          resolve({ success: false, error: error.message });
+        }
+      };
+      
+      img.onerror = () => {
+        resolve({ success: false, error: 'Failed to load image for OCR' });
+      };
+      
+      img.src = imageUrl;
+    });
+    
+  } catch (error) {
+    console.error('OCR setup error:', error);
+    return { success: false, error: error.message };
+  }
+}
+
+// Image color inversion functionality
+async function invertImageColors() {
+  try {
+    const content = document.querySelector('.content');
+    const backgroundImage = getComputedStyle(content).backgroundImage;
+    
+    if (!backgroundImage || backgroundImage === 'none') {
+      console.log('No image available for color inversion');
+      return;
+    }
+    
+    console.log('Starting image color inversion...');
+    
+    // Get the current background image URL
+    const imageUrl = backgroundImage.slice(5, -2); // Remove 'url("' and '")'
+    const img = new Image();
+    
+    img.onload = () => {
+      try {
+        // Create canvas to process the image
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Set canvas size to image size
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        
+        // Draw the image onto the canvas
+        ctx.drawImage(img, 0, 0);
+        
+        // Get image data for pixel manipulation
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imageData.data;
+        
+        // Invert each pixel's RGB values (but keep alpha unchanged)
+        for (let i = 0; i < data.length; i += 4) {
+          data[i] = 255 - data[i];       // Red
+          data[i + 1] = 255 - data[i + 1]; // Green
+          data[i + 2] = 255 - data[i + 2]; // Blue
+          // data[i + 3] is alpha, leave unchanged
+        }
+        
+        // Put the modified image data back to canvas
+        ctx.putImageData(imageData, 0, 0);
+        
+        // Convert canvas to data URL
+        const invertedDataUrl = canvas.toDataURL('image/png');
+        
+        // Apply the inverted image as the new background
+        content.style.backgroundImage = `url(${invertedDataUrl})`;
+        
+        // Clear OCR text since we modified the image
+        hasOCRText = false;
+        lastOCRText = '';
+        updateCursor();
+        
+        console.log('Image colors inverted successfully');
+        
+      } catch (error) {
+        console.error('Error processing image for inversion:', error);
+      }
+    };
+    
+    img.onerror = () => {
+      console.error('Failed to load image for inversion');
+    };
+    
+    img.src = imageUrl;
+    
+  } catch (error) {
+    console.error('Error setting up image inversion:', error);
   }
 }
