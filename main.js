@@ -812,8 +812,10 @@ CONTROLS:
 • Mouse Wheel: Adjust window opacity (0-100%)
 • Ctrl + Mouse Wheel: Scale image content (10%-500%)
 • Shift + Mouse Wheel: Scale entire window (30%-500%)
-• Left Click + Drag: Move the window
-• Middle Click + Drag: Pan/move image within window
+• Shift + Left Click + Drag: Move window only (image stays stationary on screen)
+• Ctrl + Left Click + Drag: Move image content only
+• Shift + Ctrl + Left Click + Drag: Move window and image together
+• Middle Click + Drag: Pan/move image within window (deprecated - use Ctrl+Drag)
 • Right Click: Open context menu with all features
 • Right Double-Click: Create new window
 • Left Double-Click: Capture screenshot

@@ -46,14 +46,14 @@ F1 for help
 ^y redo last transparency or fill
 tab/shift tab to cycle through windows
 
-|control|only    |shift      |control      |sh+sctrl |
-|-------|--------|-----------|-------------|---------|
-|arrows |next w  |nudge frame|nudge content|nudge all|
-|wheel  |fade    |scale frame|scale content|scale all|
-|drag   |move all|pan   frame|pan   content| -       |
-|click  |        |           |             |         |
-|dclick |snap    |           |snap autosave|         | 
-|rclick |context |           |settings     |         |
+|control|only    |shift         |control      |sh+ctrl  |
+|-------|--------|--------------|-------------|---------|
+|arrows |next w  |nudge frame   |nudge content|nudge all|
+|wheel  |fade    |scale frame   |scale content|scale all|
+|drag   |no action|move frame only|move content |move both|
+|click  |        |              |             |         |
+|dclick |snap    |              |snap autosave|         | 
+|rclick |context |              |settings     |         |
 
 right-click for context menu
 right-click position samples screen for transparency and fill

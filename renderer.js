@@ -703,56 +703,153 @@ document.addEventListener('dblclick', async (event) => {
 let isDragging = false;
 let dragInfo = null;
 let isImageDrag = false;
+let isCombinedDrag = false; // Track if both window and image should move
 let imageOffset = { x: 0, y: 0 }; // Track image position offset
 let rightClickDragStarted = false; // Track if right-click actually started a drag
 
 document.addEventListener('mousedown', async (event) => {
   if (event.button === 0) {
-    // Left-click: Window drag
-    isDragging = true;
-    isImageDrag = false;
+    // Left-click with modifier keys
+    const shiftPressed = event.shiftKey;
+    const ctrlPressed = event.ctrlKey;
     
-    try {
-      dragInfo = await ipcRenderer.invoke('start-drag', {
-        mouseX: event.clientX,
-        mouseY: event.clientY
-      });
-      console.log('Window drag started:', dragInfo);
-    } catch (error) {
-      console.error('Failed to start window drag:', error);
-      isDragging = false;
-    }
-  } else if (event.button === 2) {
-    // Right-click: Image drag (only if there's a background image)
-    const body = document.querySelector('body');
-    const backgroundImage = getComputedStyle(content).backgroundImage;
-    
-    if (backgroundImage && backgroundImage !== 'none') {
+    if (shiftPressed && ctrlPressed) {
+      // Both modifiers: Combined drag (move window and image together)
+      const backgroundImage = getComputedStyle(content).backgroundImage;
+      
+      if (backgroundImage && backgroundImage !== 'none') {
+        isDragging = true;
+        isImageDrag = false;
+        isCombinedDrag = true;
+        rightClickDragStarted = false;
+        
+        try {
+          const windowDragInfo = await ipcRenderer.invoke('start-drag', {
+            mouseX: event.clientX,
+            mouseY: event.clientY
+          });
+          
+          dragInfo = {
+            ...windowDragInfo,
+            startX: event.clientX,
+            startY: event.clientY,
+            initialOffsetX: imageOffset.x,
+            initialOffsetY: imageOffset.y
+          };
+          
+          console.log('Combined window+image drag started:', dragInfo);
+        } catch (error) {
+          console.error('Failed to start combined drag:', error);
+          isDragging = false;
+          isCombinedDrag = false;
+        }
+      } else {
+        // No image, just window drag
+        isDragging = true;
+        isImageDrag = false;
+        isCombinedDrag = false;
+        
+        try {
+          dragInfo = await ipcRenderer.invoke('start-drag', {
+            mouseX: event.clientX,
+            mouseY: event.clientY
+          });
+          console.log('Window drag started (no image):', dragInfo);
+        } catch (error) {
+          console.error('Failed to start window drag:', error);
+          isDragging = false;
+        }
+      }
+    } else if (shiftPressed) {
+      // Shift only: Window drag with image staying stationary on screen
       isDragging = true;
-      isImageDrag = true;
-      rightClickDragStarted = false; // Reset flag
+      isImageDrag = false;
+      isCombinedDrag = false;
       
-      dragInfo = {
-        startX: event.clientX,
-        startY: event.clientY,
-        initialOffsetX: imageOffset.x,
-        initialOffsetY: imageOffset.y
-      };
+      try {
+        const windowDragInfo = await ipcRenderer.invoke('start-drag', {
+          mouseX: event.clientX,
+          mouseY: event.clientY
+        });
+        
+        // Store initial image offset and window position for counter-movement calculation
+        dragInfo = {
+          ...windowDragInfo,
+          initialOffsetX: imageOffset.x,
+          initialOffsetY: imageOffset.y
+        };
+        
+        console.log('Window drag started (image stays stationary):', dragInfo);
+      } catch (error) {
+        console.error('Failed to start window drag:', error);
+        isDragging = false;
+      }
+    } else if (ctrlPressed) {
+      // Ctrl only: Image drag (only if there's a background image)
+      const backgroundImage = getComputedStyle(content).backgroundImage;
       
-      console.log('Image drag ready');
-      // Don't prevent default here - wait for actual movement
+      if (backgroundImage && backgroundImage !== 'none') {
+        isDragging = true;
+        isImageDrag = true;
+        isCombinedDrag = false;
+        rightClickDragStarted = false; // Reset flag
+        
+        dragInfo = {
+          startX: event.clientX,
+          startY: event.clientY,
+          initialOffsetX: imageOffset.x,
+          initialOffsetY: imageOffset.y
+        };
+        
+        console.log('Image drag ready');
+      }
     }
+    // No modifiers: No drag action
+  } else if (event.button === 2) {
+    // Right-click: Keep for context menu only, no dragging
+    // (Right-click dragging is now handled by Ctrl+Left-click)
   }
 });
 
 document.addEventListener('mousemove', async (event) => {
   if (isDragging && dragInfo) {
-    if (isImageDrag) {
-      // Right-click drag: Move the background image
+    if (isCombinedDrag) {
+      // Combined drag: Move both window and image
       const deltaX = event.clientX - dragInfo.startX;
       const deltaY = event.clientY - dragInfo.startY;
       
-      // Only start dragging if mouse moved significantly (prevents accidental drag on simple right-click)
+      // Only start dragging if mouse moved significantly
+      if (!rightClickDragStarted && (Math.abs(deltaX) > 3 || Math.abs(deltaY) > 3)) {
+        rightClickDragStarted = true;
+        console.log('Combined drag started');
+      }
+      
+      if (rightClickDragStarted) {
+        // Move the window
+        const newX = event.screenX - dragInfo.offsetX;
+        const newY = event.screenY - dragInfo.offsetY;
+        
+        try {
+          await ipcRenderer.invoke('do-drag', {
+            x: newX,
+            y: newY,
+            targetWidth: dragInfo.targetWidth,
+            targetHeight: dragInfo.targetHeight
+          });
+        } catch (error) {
+          console.error('Failed to drag window in combined mode:', error);
+        }
+        
+        // Move the image (keeping it in the same relative position within the window)
+        // Since the window moved, the image doesn't need to move relative to the window
+        // This maintains the traditional behavior where the image moves with the window
+      }
+    } else if (isImageDrag) {
+      // Image-only drag: Move the background image
+      const deltaX = event.clientX - dragInfo.startX;
+      const deltaY = event.clientY - dragInfo.startY;
+      
+      // Only start dragging if mouse moved significantly (prevents accidental drag on simple click)
       if (!rightClickDragStarted && (Math.abs(deltaX) > 3 || Math.abs(deltaY) > 3)) {
         rightClickDragStarted = true;
         console.log('Image drag started');
@@ -762,15 +859,18 @@ document.addEventListener('mousemove', async (event) => {
         imageOffset.x = dragInfo.initialOffsetX + deltaX;
         imageOffset.y = dragInfo.initialOffsetY + deltaY;
         
-        const body = document.querySelector('body');
         content.style.backgroundPosition = `${imageOffset.x}px ${imageOffset.y}px`;
         
         console.log(`Image offset: ${imageOffset.x}, ${imageOffset.y}`);
       }
     } else {
-      // Left-click drag: Move the window
+      // Window-only drag: Move the window but keep image stationary on screen
       const newX = event.screenX - dragInfo.offsetX;
       const newY = event.screenY - dragInfo.offsetY;
+      
+      // Calculate total window movement from the initial position when drag started
+      const totalWindowMoveX = newX - dragInfo.windowX;
+      const totalWindowMoveY = newY - dragInfo.windowY;
       
       try {
         await ipcRenderer.invoke('do-drag', {
@@ -779,6 +879,16 @@ document.addEventListener('mousemove', async (event) => {
           targetWidth: dragInfo.targetWidth,
           targetHeight: dragInfo.targetHeight
         });
+        
+        // Adjust image position in opposite direction to keep it stationary on screen
+        // Calculate offset based on total window movement from start, not incremental deltas
+        imageOffset.x = dragInfo.initialOffsetX - totalWindowMoveX;
+        imageOffset.y = dragInfo.initialOffsetY - totalWindowMoveY;
+        
+        content.style.backgroundPosition = `${imageOffset.x}px ${imageOffset.y}px`;
+        
+        console.log(`Window moved total: (${totalWindowMoveX}, ${totalWindowMoveY}), Image offset: (${imageOffset.x}, ${imageOffset.y})`);
+        
       } catch (error) {
         console.error('Failed to drag window:', error);
       }
@@ -790,8 +900,9 @@ document.addEventListener('mouseup', () => {
   if (isDragging) {
     isDragging = false;
     dragInfo = null;
-    console.log(isImageDrag ? 'Image drag ended' : 'Window drag ended');
+    console.log(isCombinedDrag ? 'Combined drag ended' : (isImageDrag ? 'Image drag ended' : 'Window drag ended'));
     isImageDrag = false;
+    isCombinedDrag = false;
     rightClickDragStarted = false; // Reset flag
   }
 });
