@@ -593,6 +593,23 @@ ipcRenderer.on('show-help', async () => {
   }
 });
 
+// Handle window movement (from border dragging or other window operations)
+ipcRenderer.on('window-moved', (event, { deltaX, deltaY }) => {
+  // Only adjust image if we're not currently in a custom drag operation
+  if (!isDragging) {
+    // Adjust image position to compensate for window movement
+    // This keeps the image visually stationary when the window is moved by border dragging
+    imageOffset.x -= deltaX;
+    imageOffset.y -= deltaY;
+    
+    const content = document.querySelector('.content');
+    if (content) {
+      content.style.backgroundPosition = `${imageOffset.x}px ${imageOffset.y}px`;
+      console.log(`Window moved by border drag: (${deltaX}, ${deltaY}), adjusted image offset: (${imageOffset.x}, ${imageOffset.y})`);
+    }
+  }
+});
+
 
 // Mouse wheel event to adjust opacity, image scale, or window scale
 document.addEventListener('wheel', (event) => {

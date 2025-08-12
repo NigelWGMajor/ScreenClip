@@ -194,6 +194,26 @@ function createWindow() {
     }
   });
 
+  // Track window movement for image position adjustment
+  let lastWindowPosition = null;
+  
+  newWindow.on('move', () => {
+    const currentBounds = newWindow.getBounds();
+    
+    if (lastWindowPosition) {
+      const deltaX = currentBounds.x - lastWindowPosition.x;
+      const deltaY = currentBounds.y - lastWindowPosition.y;
+      
+      // Only notify if the window actually moved
+      if (deltaX !== 0 || deltaY !== 0) {
+        // Send window movement to renderer for image position adjustment
+        newWindow.webContents.send('window-moved', { deltaX, deltaY });
+      }
+    }
+    
+    lastWindowPosition = { x: currentBounds.x, y: currentBounds.y };
+  });
+
   // Add the window to the windows array
   windows.push(newWindow);
   
