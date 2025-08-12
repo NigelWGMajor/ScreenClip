@@ -92,10 +92,67 @@ npm run dist            # Build without publishing
 - Coordinate system translations for multi-monitor setups
 - Preserve aspect ratios during resize operations
 
+## Critical Implementation Lessons
+
+### Mouse Wheel Fade System Architecture
+**Problem**: Original implementation faded a black `.fill` background instead of the actual image, creating darkening overlay effects.
+
+**Solution**: Restructured HTML with layered opacity control:
+- `body` → Border (always visible, uses `opacity: 0` for toggle instead of `display: none`)  
+- `.content` → Screenshot image (fadeable with mouse wheel)
+- `.fill` → Mouse hit detection (minimum 5% opacity, never fades)
+
+**Key Insight**: Border must be in separate element from fadeable content to prevent interference.
+
+### Screenshot Positioning & Copy-Paste Registration
+**Problem**: Images drifted 2px up/left on paste operations due to inconsistent capture areas.
+
+**Root Cause**: Copy captured `window - 4px` (excluding border) but paste created window sized to captured image.
+
+**Solution**: 
+- **Copy captures entire window** (including border area) → No size mismatch
+- **Paste positions at `0px, 0px`** → Perfect alignment  
+- **Border toggle uses `opacity: 0`** instead of `transparent` → Clean on/off behavior
+
+**Critical Rule**: Copy-paste cycles must maintain identical dimensions for zero drift.
+
+### DPI Scaling in File Operations
+**Problem**: Saved images had correct DPI resolution, but loading applied DPI scaling twice, causing oversized images.
+
+**Root Cause**: 
+- **Save**: Captures at physical pixels (DPI-adjusted)
+- **Load**: Treated saved dimensions as logical pixels, reapplying DPI scaling
+
+**Solution**: Divide loaded image dimensions by `scaleFactor` to convert physical → logical pixels.
+
+**Formula**: `logicalSize = physicalPixels / scaleFactor`
+
+### Image Cropping Implementation  
+**Problem**: Crop-to-view only resized window instead of actually cropping image content.
+
+**Solution**: Canvas-based image cropping:
+1. Extract data URL from background image
+2. Calculate crop coordinates: `originalWindowBounds.x/y * scaleFactor` 
+3. Use canvas `drawImage()` to extract window area from full screen
+4. Replace background with cropped image data URL
+
+**Critical Detail**: Don't add border offsets - screenshot already includes full window content.
+
+### Border Offset Anti-Pattern
+**Anti-Pattern**: Adding/subtracting `borderWidth` offsets in positioning calculations.
+
+**Correct Approach**: 
+- Screenshots capture **entire window including border**
+- Position calculations use **exact window coordinates** 
+- No compensation needed for border thickness
+
+**Rule**: Border offsets cause pixel-perfect alignment issues. Use actual window bounds.
+
 ## Development Notes
 
 - **Context Isolation**: Disabled (`contextIsolation: false`) for direct IPC access
-- **Security**: Node integration enabled for file system operations
+- **Security**: Node integration enabled for file system operations  
 - **Performance**: Debounced auto-crop prevents excessive window operations
 - **Cross-Platform**: Build configurations for Windows, macOS, and Linux
 - **DPI Scaling**: Handles high-DPI displays with proper pixel calculations
+- **Positioning**: All coordinates use window bounds directly - no border compensations
