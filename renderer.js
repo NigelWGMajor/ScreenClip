@@ -34,7 +34,78 @@ document.addEventListener('DOMContentLoaded', () => {
     fill.style.setProperty('--fade-opacity', currentOpacity);
     console.log(`Initial .fill fade opacity set to: ${currentOpacity}`);
   }
+  
+  // Set initial cursor (should be context-menu since no image is loaded yet)
+  updateCursor();
+  console.log('Initial cursor set');
 });
+
+// Cursor management for different drag modes
+function updateCursor(event) {
+  const body = document.body;
+  const shiftPressed = event ? event.shiftKey : false;
+  const ctrlPressed = event ? event.ctrlKey : false;
+  
+  if (typeof isDragging !== 'undefined' && isDragging) {
+    // Don't change cursor while dragging
+    return;
+  }
+  
+  // Check if we have any background image content
+  const content = document.querySelector('.content');
+  const hasImage = content && getComputedStyle(content).backgroundImage !== 'none';
+  
+  // Check if mouse is near borders for resize cursors
+  if (event && !shiftPressed && !ctrlPressed) {
+    const borderCursor = getBorderCursor(event);
+    if (borderCursor) {
+      body.style.cursor = borderCursor;
+      return;
+    }
+  }
+  
+  if (!hasImage) {
+    // No image loaded yet - show default cursor
+    body.style.cursor = 'default';
+  } else if (shiftPressed && ctrlPressed) {
+    // Both modifiers: grabbing cursor (window and image together)
+    body.style.cursor = 'grabbing';
+  } else if (shiftPressed) {
+    // Shift only: 4-way arrow (window frame only)
+    body.style.cursor = 'all-scroll';
+  } else if (ctrlPressed) {
+    // Ctrl only: hand cursor (image content only)
+    body.style.cursor = 'grab';
+  } else {
+    // No modifiers but has image: precision cursor
+    body.style.cursor = 'crosshair';
+  }
+}
+
+// Function to determine border cursor based on mouse position
+function getBorderCursor(event) {
+  const borderWidth = 5; // Pixels from edge to show resize cursor
+  const rect = document.body.getBoundingClientRect();
+  const x = event.clientX;
+  const y = event.clientY;
+  
+  const nearLeft = x <= borderWidth;
+  const nearRight = x >= rect.width - borderWidth;
+  const nearTop = y <= borderWidth;
+  const nearBottom = y >= rect.height - borderWidth;
+  
+  // Corner cursors
+  if (nearTop && nearLeft) return 'nw-resize';
+  if (nearTop && nearRight) return 'ne-resize';
+  if (nearBottom && nearLeft) return 'sw-resize';
+  if (nearBottom && nearRight) return 'se-resize';
+  
+  // Edge cursors
+  if (nearTop || nearBottom) return 'ns-resize';
+  if (nearLeft || nearRight) return 'ew-resize';
+  
+  return null; // Not near a border
+}
 
 
 ipcRenderer.on('toggle-border', () => {
@@ -142,6 +213,9 @@ ipcRenderer.on('menu-load-file', async () => {
       content.style.opacity = '1';
       currentOpacity = 1.0;
       console.log('Border turned off and opacity set to 100% for loaded image');
+      
+      // Update cursor now that we have image content
+      updateCursor();
       
       // Get current display scale factor to handle DPI correctly
       const displayInfo = await ipcRenderer.invoke('get-display-info');
@@ -708,6 +782,9 @@ document.addEventListener('dblclick', async (event) => {
       const appliedBg = getComputedStyle(content).backgroundImage;
       console.log('Background image applied:', appliedBg !== 'none' ? 'YES' : 'NO');
       
+      // Update cursor now that we have image content
+      updateCursor();
+      
     } else {
       console.error('Failed to capture screenshot - cropInfo is null or missing fullScreenshot');
     }
@@ -723,6 +800,17 @@ let isImageDrag = false;
 let isCombinedDrag = false; // Track if both window and image should move
 let imageOffset = { x: 0, y: 0 }; // Track image position offset
 let rightClickDragStarted = false; // Track if right-click actually started a drag
+
+// Add keyboard event listeners for modifier key changes
+document.addEventListener('keydown', updateCursor);
+document.addEventListener('keyup', updateCursor);
+
+// Add mousemove listener to update cursor based on current modifier state
+document.addEventListener('mousemove', (event) => {
+  if (!isDragging) {
+    updateCursor(event);
+  }
+});
 
 document.addEventListener('mousedown', async (event) => {
   if (event.button === 0) {
@@ -754,6 +842,9 @@ document.addEventListener('mousedown', async (event) => {
             initialOffsetY: imageOffset.y
           };
           
+          // Set cursor for combined drag
+          document.body.style.cursor = 'grabbing';
+          
           console.log('Combined window+image drag started:', dragInfo);
         } catch (error) {
           console.error('Failed to start combined drag:', error);
@@ -771,6 +862,10 @@ document.addEventListener('mousedown', async (event) => {
             mouseX: event.clientX,
             mouseY: event.clientY
           });
+          
+          // Set cursor for window-only drag
+          document.body.style.cursor = 'move';
+          
           console.log('Window drag started (no image):', dragInfo);
         } catch (error) {
           console.error('Failed to start window drag:', error);
@@ -796,6 +891,9 @@ document.addEventListener('mousedown', async (event) => {
           initialOffsetY: imageOffset.y
         };
         
+        // Set cursor for shift-only drag (window frame)
+        document.body.style.cursor = 'all-scroll';
+        
         console.log('Window drag started (image stays stationary):', dragInfo);
       } catch (error) {
         console.error('Failed to start window drag:', error);
@@ -817,6 +915,9 @@ document.addEventListener('mousedown', async (event) => {
           initialOffsetX: imageOffset.x,
           initialOffsetY: imageOffset.y
         };
+        
+        // Set cursor for ctrl-only drag (image content)
+        document.body.style.cursor = 'grabbing';
         
         console.log('Image drag ready');
       }
@@ -913,7 +1014,7 @@ document.addEventListener('mousemove', async (event) => {
   }
 });
 
-document.addEventListener('mouseup', () => {
+document.addEventListener('mouseup', (event) => {
   if (isDragging) {
     isDragging = false;
     dragInfo = null;
@@ -921,6 +1022,9 @@ document.addEventListener('mouseup', () => {
     isImageDrag = false;
     isCombinedDrag = false;
     rightClickDragStarted = false; // Reset flag
+    
+    // Reset cursor based on current modifier state
+    updateCursor(event);
   }
 });
 
@@ -1025,6 +1129,9 @@ document.addEventListener('keydown', async (event) => {
         content.style.opacity = '1';
         currentOpacity = 1.0;
         console.log('Border turned off and opacity set to 100% for pasted image');
+        
+        // Update cursor now that we have image content
+        updateCursor();
         
         // Use the logical dimensions which should be DPI-adjusted
         originalImageWidth = clipboardData.logicalWidth;
@@ -1177,6 +1284,9 @@ document.addEventListener('DOMContentLoaded', () => {
             content.style.opacity = '1';
             currentOpacity = 1.0;
             console.log('Border turned off and opacity set to 100% for dropped image');
+            
+            // Update cursor now that we have image content
+            updateCursor();
             
             // Get current display scale factor to handle DPI correctly
             const displayInfo = await ipcRenderer.invoke('get-display-info');
