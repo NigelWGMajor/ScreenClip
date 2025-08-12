@@ -1,18 +1,9 @@
-const { app, BrowserWindow, Menu, ipcMain, screen, nativeImage, desktopCapturer, clipboard, dialog, protocol } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, screen, nativeImage, desktopCapturer, clipboard, dialog } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
 let mainWindow;
 let windows = []; // Array to track all windows
-
-// Register a custom protocol to serve local files for Tesseract
-app.whenReady().then(() => {
-  protocol.registerFileProtocol('tesseract', (request, callback) => {
-    const url = request.url.substr(11); // Remove 'tesseract://' prefix
-    const filePath = path.join(__dirname, url);
-    callback({ path: filePath });
-  });
-});
 
 function createWindow() {
   const newWindow = new BrowserWindow({
@@ -138,12 +129,6 @@ function createWindow() {
       ]
     },
     { type: 'separator' },
-    {
-      label: 'Extract Text (OCR)',
-      click: () => {
-        newWindow.webContents.send('perform-ocr');
-      }
-    },
     {
       label: 'Invert Colors (Ctrl+I)',
       click: () => {
@@ -874,7 +859,7 @@ CONTEXT MENU:
 • Transparentize Color: Remove backgrounds with tolerance control
   - Multiple tolerance levels from precise to broad matching
   - Custom tolerance input for exact control
-• Extract Text (OCR): Extract text from visible image portion to clipboard
+• Invert Colors (Ctrl+I): Invert image colors for better contrast
 • New Window: Create additional window for parallel workflows
 • Close Window: Close current window
 • Close All Windows: Close all open ScreenClip windows
