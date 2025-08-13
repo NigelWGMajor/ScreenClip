@@ -23,8 +23,8 @@ const baseWindowHeight = 800;
 let originalWindowBounds = null;
 
 // Track window position locally to avoid system reads during moves
-// CRITICAL: This prevents drift by never reading back from system during moves
-// Direction: Code → Screen (never Screen → Code during positioning)
+// CRITICAL: This prevents drift by eliminating getBounds() calls during positioning
+// Data flow is: tracked position → main process → screen (never read back)
 let trackedWindowPosition = { x: 100, y: 100 }; // Will be initialized on load
 
 // Debounce timer for auto-crop after scaling
@@ -1625,25 +1625,25 @@ document.addEventListener('keydown', async (event) => {
 });
 
 // Move window position using tracked coordinates (no system reads)
-// CRITICAL: This function must NEVER call getBounds() during moves!
-// Any system reads will cause cumulative drift due to DPI/aliasing
+// CRITICAL: This function eliminates drift by using pure math on tracked values
+// NEVER call getBounds() in this function - it breaks the drift-prevention system
 async function adjustWindowPosition(deltaX, deltaY) {
   try {
     console.log(`Window move: deltaX=${deltaX}, deltaY=${deltaY}`);
     
-    // CRITICAL: Update tracked position with pure math - NO system reads!
-    // This prevents cumulative error from DPI scaling and aliasing
+    // Update tracked position (pure math, no system reads)
+    // CRITICAL: This is the ONLY place that updates tracked position for moves
     trackedWindowPosition.x += deltaX;
     trackedWindowPosition.y += deltaY;
     
     console.log(`New tracked position: x=${trackedWindowPosition.x}, y=${trackedWindowPosition.y}`);
     
     // Send position to main process (one-way: code → screen)
-    // CRITICAL: Never pass width/height here - main process uses stored constants
+    // CRITICAL: Only pass x,y - main process uses stored constants for width/height
     await ipcRenderer.invoke('set-window-bounds', {
       x: trackedWindowPosition.x,
       y: trackedWindowPosition.y
-      // No width/height - main process uses stored constants to prevent drift
+      // No width/height - main process uses stored constants
     });
     
     console.log(`Window moved by (${deltaX}, ${deltaY})`);

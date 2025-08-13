@@ -7,8 +7,7 @@ let windows = []; // Array to track all windows
 
 // Track window position and dimensions to prevent drift
 // These are the single source of truth - never read back from system
-// CRITICAL: Any changes to position/size MUST go through these variables
-// DO NOT use getBounds() during moves - it causes cumulative drift!
+// CRITICAL: This prevents cumulative drift from repeated getBounds() calls
 const windowStates = new Map(); // windowId -> {x, y, width, height}
 const programmaticMoves = new Set(); // Track which windows are being moved programmatically
 
@@ -29,11 +28,13 @@ function createWindow() {
   });
 
   // Initialize window state tracking
-  // CRITICAL: This is the ONLY place where initial dimensions are set
+  // CRITICAL: These values are the ONLY source of truth for window position/size
+  // DO NOT read back from getBounds() during position moves - causes drift!
   windowStates.set(newWindow.id, { x: 100, y: 100, width: 1200, height: 800 });
   
   // Only update tracking when user manually resizes (not during programmatic moves)
-  // CRITICAL: This prevents resize events from corrupting our stored state during setBounds()
+  // CRITICAL: This prevents the resize event from interfering with position moves
+  // The programmaticMoves flag prevents drift from setBounds() triggering resize events
   newWindow.on('resize', () => {
     // Skip if this is a programmatic move
     if (programmaticMoves.has(newWindow.id)) {
@@ -44,7 +45,6 @@ function createWindow() {
     const bounds = newWindow.getBounds();
     const state = windowStates.get(newWindow.id);
     if (state) {
-      // ONLY update width/height here - never position during manual resize
       state.width = bounds.width;
       state.height = bounds.height;
       console.log(`Window ${newWindow.id} manually resized to: ${bounds.width}x${bounds.height}`);
@@ -443,8 +443,11 @@ ipcMain.handle('set-window-bounds', (event, { x, y, width, height }) => {
     throw new Error('Could not find sender window');
   }
   
-  // CRITICAL: Get tracked state - never use getBounds() here!
-  // Reading from system causes drift due to DPI/aliasing issues
+  // CRITICAL: This handler uses STORED values as single source of truth
+  // DO NOT use getBounds() here - it causes cumulative drift!
+  // Data flow is: stored state → setBounds() ONLY (never the reverse)
+  
+  // Get current tracked state
   let state = windowStates.get(senderWindow.id);
   if (!state) {
     // Initialize if missing
@@ -452,8 +455,7 @@ ipcMain.handle('set-window-bounds', (event, { x, y, width, height }) => {
     windowStates.set(senderWindow.id, state);
   }
   
-  // Update tracked state with provided values only
-  // CRITICAL: Only change what's explicitly provided
+  // Update tracked state with provided values
   if (x !== undefined) state.x = x;
   if (y !== undefined) state.y = y;
   if (width !== undefined) state.width = width;
@@ -461,12 +463,11 @@ ipcMain.handle('set-window-bounds', (event, { x, y, width, height }) => {
   
   console.log(`Setting window bounds from tracked state: x=${state.x}, y=${state.y}, w=${state.width}, h=${state.height}`);
   
-  // CRITICAL: Mark as programmatic move to prevent resize event interference
-  // Without this, the resize event reads back from system and causes drift!
+  // Mark as programmatic move to prevent resize event interference
+  // CRITICAL: This prevents the resize event from reading back and causing drift
   programmaticMoves.add(senderWindow.id);
   
   // Apply tracked state to window (one-way: code → screen)
-  // CRITICAL: Always use stored values, never system values
   senderWindow.setBounds({
     x: Math.round(state.x),
     y: Math.round(state.y),
@@ -475,7 +476,6 @@ ipcMain.handle('set-window-bounds', (event, { x, y, width, height }) => {
   });
   
   // Clear programmatic flag after a short delay
-  // This allows manual resizes to work normally again
   setTimeout(() => {
     programmaticMoves.delete(senderWindow.id);
   }, 50);
