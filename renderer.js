@@ -22,17 +22,32 @@ const baseWindowHeight = 800;
 // Track original window state for reset functionality
 let originalWindowBounds = null;
 
+// Track window position locally to avoid system reads during moves
+// CRITICAL: This prevents drift by never reading back from system during moves
+// Direction: Code → Screen (never Screen → Code during positioning)
+let trackedWindowPosition = { x: 100, y: 100 }; // Will be initialized on load
+
 // Debounce timer for auto-crop after scaling
 let autoCropTimer = null;
 
 
 // Set initial fade opacity on .fill when DOM is loaded
-document.addEventListener('DOMContentLoaded', () => {
+document.addEventListener('DOMContentLoaded', async () => {
   const fill = document.querySelector('.fill');
   if (fill) {
     fill.classList.add('fade-opacity');
     fill.style.setProperty('--fade-opacity', currentOpacity);
     console.log(`Initial .fill fade opacity set to: ${currentOpacity}`);
+  }
+  
+  // Initialize tracked position (ONE TIME READ to sync with actual position)
+  try {
+    const bounds = await ipcRenderer.invoke('get-window-bounds');
+    trackedWindowPosition.x = bounds.x;
+    trackedWindowPosition.y = bounds.y;
+    console.log(`Initialized position tracking: x=${trackedWindowPosition.x}, y=${trackedWindowPosition.y}`);
+  } catch (error) {
+    console.error('Error initializing position tracking:', error);
   }
   
   // Set initial cursor (should be context-menu since no image is loaded yet)
@@ -1549,4 +1564,116 @@ async function invertImageColors() {
   } catch (error) {
     console.error('Error setting up image inversion:', error);
   }
+}
+
+// Keyboard event handler for shortcuts and positioning
+document.addEventListener('keydown', async (event) => {
+  // Handle Ctrl+0 for reset
+  if (event.ctrlKey && event.key === '0') {
+    event.preventDefault();
+    try {
+      await ipcRenderer.invoke('reset-content-scale');
+      console.log('Content scale reset triggered');
+    } catch (error) {
+      console.error('Error resetting content scale:', error);
+    }
+  }
+  
+  // Handle arrow keys for fine positioning
+  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {
+    if (event.ctrlKey || event.shiftKey) {
+      event.preventDefault();
+      
+      // Calculate delta based on device pixel ratio
+      const pixelDelta = Math.max(1, Math.round(window.devicePixelRatio));
+      
+      let deltaX = 0, deltaY = 0;
+      switch(event.key) {
+        case 'ArrowLeft':
+          deltaX = -pixelDelta;
+          break;
+        case 'ArrowRight':
+          deltaX = pixelDelta;
+          break;
+        case 'ArrowUp':
+          deltaY = -pixelDelta;
+          break;
+        case 'ArrowDown':
+          deltaY = pixelDelta;
+          break;
+      }
+      
+      console.log(`Arrow key: ${event.key}, deltaX: ${deltaX}, deltaY: ${deltaY}, Ctrl: ${event.ctrlKey}, Shift: ${event.shiftKey}`);
+      
+      try {
+        if (event.ctrlKey && event.shiftKey) {
+          // Ctrl+Shift+Arrow: Move both window and content
+          await adjustWindowPosition(deltaX, deltaY);
+          adjustContentPosition(deltaX, deltaY);
+        } else if (event.shiftKey && !event.ctrlKey) {
+          // Shift+Arrow: Move window only
+          await adjustWindowPosition(deltaX, deltaY);
+        } else if (event.ctrlKey && !event.shiftKey) {
+          // Ctrl+Arrow: Move content only
+          adjustContentPosition(deltaX, deltaY);
+        }
+      } catch (error) {
+        console.error('Error adjusting position:', error);
+      }
+    }
+  }
+});
+
+// Move window position using tracked coordinates (no system reads)
+// CRITICAL: This function must NEVER call getBounds() during moves!
+// Any system reads will cause cumulative drift due to DPI/aliasing
+async function adjustWindowPosition(deltaX, deltaY) {
+  try {
+    console.log(`Window move: deltaX=${deltaX}, deltaY=${deltaY}`);
+    
+    // CRITICAL: Update tracked position with pure math - NO system reads!
+    // This prevents cumulative error from DPI scaling and aliasing
+    trackedWindowPosition.x += deltaX;
+    trackedWindowPosition.y += deltaY;
+    
+    console.log(`New tracked position: x=${trackedWindowPosition.x}, y=${trackedWindowPosition.y}`);
+    
+    // Send position to main process (one-way: code → screen)
+    // CRITICAL: Never pass width/height here - main process uses stored constants
+    await ipcRenderer.invoke('set-window-bounds', {
+      x: trackedWindowPosition.x,
+      y: trackedWindowPosition.y
+      // No width/height - main process uses stored constants to prevent drift
+    });
+    
+    console.log(`Window moved by (${deltaX}, ${deltaY})`);
+  } catch (error) {
+    console.error('Error moving window:', error);
+  }
+}
+
+// Move content position
+function adjustContentPosition(deltaX, deltaY) {
+  const imageContainer = document.querySelector('.image-container');
+  if (!imageContainer) return;
+  
+  // Get current transform
+  const currentTransform = imageContainer.style.transform || '';
+  let currentX = 0, currentY = 0;
+  
+  const translateMatch = currentTransform.match(/translate\(([^,]+),\s*([^)]+)\)/);
+  if (translateMatch) {
+    currentX = parseFloat(translateMatch[1]) || 0;
+    currentY = parseFloat(translateMatch[2]) || 0;
+  }
+  
+  // Apply delta
+  const newX = currentX + deltaX;
+  const newY = currentY + deltaY;
+  
+  // Update transform
+  const otherTransforms = currentTransform.replace(/translate\([^)]*\)/, '').trim();
+  imageContainer.style.transform = `translate(${newX}px, ${newY}px) ${otherTransforms}`.trim();
+  
+  console.log(`Content moved by (${deltaX}, ${deltaY}) to (${newX}, ${newY})`);
 }
