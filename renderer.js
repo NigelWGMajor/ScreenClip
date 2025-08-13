@@ -710,19 +710,100 @@ ipcRenderer.on('window-moved', (event, { deltaX, deltaY }) => {
   }
 });
 
+// Handle content realignment to top-left (from expand-to-display)
+ipcRenderer.on('realign-content-to-top-left', () => {
+  try {
+    const content = document.querySelector('.content');
+    if (content) {
+      // Reset content position to top-left (0, 0)
+      content.style.backgroundPosition = '0px 0px';
+      imageOffset = { x: 0, y: 0 };
+      originalPositionX = 0;
+      originalPositionY = 0;
+      
+      console.log('Content realigned to top-left corner');
+    }
+  } catch (error) {
+    console.error('Error realigning content to top-left:', error);
+  }
+});
+
 
 // Mouse wheel event to adjust opacity, image scale, or window scale
 document.addEventListener('wheel', (event) => {
   console.log('Mouse wheel event detected, deltaY:', event.deltaY, 'ctrlKey:', event.ctrlKey, 'shiftKey:', event.shiftKey);
   event.preventDefault(); // Prevent default scroll behavior
-  const app = document.getElementById('app');
-  const body = document.body;
-  if (event.shiftKey) {
-    // ...existing code for window scaling...
-    // (leave unchanged)
+  
+  if (event.shiftKey && event.ctrlKey) {
+    // Ctrl+Shift+Wheel: Scale window size (zoom in/out entire window)
+    const delta = event.deltaY < 0 ? 1.1 : 0.9; // 10% increment/decrement
+    
+    try {
+      ipcRenderer.invoke('get-window-bounds').then(currentBounds => {
+        const newWidth = Math.max(100, Math.round(currentBounds.width * delta));
+        const newHeight = Math.max(100, Math.round(currentBounds.height * delta));
+        
+        // Keep window centered during resize
+        const newX = currentBounds.x + Math.round((currentBounds.width - newWidth) / 2);
+        const newY = currentBounds.y + Math.round((currentBounds.height - newHeight) / 2);
+        
+        ipcRenderer.invoke('set-window-bounds', {
+          x: newX,
+          y: newY,
+          width: newWidth,
+          height: newHeight
+        });
+        
+        console.log(`Window scaled to: ${newWidth}x${newHeight}px at (${newX}, ${newY})`);
+      });
+    } catch (error) {
+      console.error('Error scaling window:', error);
+    }
   } else if (event.ctrlKey) {
-    // ...existing code for image scaling...
-    // (leave unchanged)
+    // Ctrl+Wheel: Scale image content
+    const content = document.querySelector('.content');
+    if (!content || !originalImageWidth || !originalImageHeight) {
+      console.log('No image content available for scaling');
+      return;
+    }
+    
+    const delta = event.deltaY < 0 ? 1.1 : 0.9; // 10% increment/decrement
+    currentImageScale *= delta;
+    currentImageScale = Math.max(0.1, Math.min(10.0, currentImageScale)); // Limit scale range
+    
+    const newWidth = Math.round(originalImageWidth * currentImageScale);
+    const newHeight = Math.round(originalImageHeight * currentImageScale);
+    
+    content.style.backgroundSize = `${newWidth}px ${newHeight}px`;
+    
+    console.log(`Image scaled to: ${(currentImageScale * 100).toFixed(1)}% (${newWidth}x${newHeight}px)`);
+    
+    updateCursor();
+  } else if (event.shiftKey) {
+    // Shift+Wheel: Scale window size
+    const delta = event.deltaY < 0 ? 1.05 : 0.95; // 5% increment/decrement
+    
+    try {
+      ipcRenderer.invoke('get-window-bounds').then(currentBounds => {
+        const newWidth = Math.max(100, Math.round(currentBounds.width * delta));
+        const newHeight = Math.max(100, Math.round(currentBounds.height * delta));
+        
+        // Keep window centered during resize
+        const newX = currentBounds.x + Math.round((currentBounds.width - newWidth) / 2);
+        const newY = currentBounds.y + Math.round((currentBounds.height - newHeight) / 2);
+        
+        ipcRenderer.invoke('set-window-bounds', {
+          x: newX,
+          y: newY,
+          width: newWidth,
+          height: newHeight
+        });
+        
+        console.log(`Window scaled to: ${newWidth}x${newHeight}px at (${newX}, ${newY})`);
+      });
+    } catch (error) {
+      console.error('Error scaling window:', error);
+    }
   } else {
     // Normal wheel: Adjust opacity of .content div (which contains the image)
     // Up (deltaY < 0): more opaque, Down (deltaY > 0): more transparent
@@ -1093,27 +1174,22 @@ document.addEventListener('contextmenu', (event) => {
   // Otherwise, allow normal context menu
 });
 
-// Keyboard event handler for Ctrl+C (copy) and Ctrl+V (paste) functionality
+// COMPREHENSIVE KEYBOARD HANDLER - All shortcuts in one place to avoid conflicts
+// CRITICAL: This is the ONLY main keyboard handler - do not add duplicate handlers!
 document.addEventListener('keydown', async (event) => {
-  // Check for Ctrl+C (copy current view to clipboard)
+  // Handle Ctrl+C (copy current view to clipboard)
   if (event.ctrlKey && event.key.toLowerCase() === 'c') {
-    event.preventDefault(); // Prevent default copy behavior
-    
+    event.preventDefault();
     console.log('Ctrl+C detected, copying current window view to clipboard...');
     
     try {
-      // Temporarily set content opacity to 1 for the capture
       const content = document.querySelector('.content');
       const originalOpacity = content.style.opacity;
       content.style.opacity = '1';
       
-      // Wait a moment for the opacity change to take effect
       await new Promise(resolve => setTimeout(resolve, 50));
       
-      // Capture current window view to clipboard
       const success = await ipcRenderer.invoke('copy-to-clipboard');
-      
-      // Restore original opacity
       content.style.opacity = originalOpacity;
       
       if (success) {
@@ -1123,20 +1199,17 @@ document.addEventListener('keydown', async (event) => {
       }
     } catch (error) {
       console.error('Error copying to clipboard:', error);
-      
-      // Restore content opacity even if there was an error
       const content = document.querySelector('.content');
       content.style.opacity = currentOpacity;
     }
   }
-  // Check for Ctrl+V (paste image from clipboard)
+  
+  // Handle Ctrl+V (paste image from clipboard)  
   else if (event.ctrlKey && event.key.toLowerCase() === 'v') {
-    event.preventDefault(); // Prevent default paste behavior
-    
+    event.preventDefault();
     console.log('Ctrl+V detected, pasting image from clipboard...');
     
     try {
-      // Request image from clipboard
       const clipboardData = await ipcRenderer.invoke('paste-from-clipboard');
       
       if (clipboardData) {
@@ -1144,19 +1217,16 @@ document.addEventListener('keydown', async (event) => {
         console.log(`Image size: ${clipboardData.logicalWidth}x${clipboardData.logicalHeight}px`);
         console.log(`Scale factor: ${clipboardData.scaleFactor || 'unknown'}`);
         
-        // Apply the pasted image as background
         const content = document.querySelector('.content');
         const body = document.querySelector('body');
         content.style.backgroundImage = `url(${clipboardData.dataUrl})`;
         content.style.backgroundRepeat = 'no-repeat';
         
-        // Automatically turn off border and set content opacity to 100% when pasting
         body.style.borderColor = 'transparent';
         content.style.opacity = '1';
         currentOpacity = 1.0;
         console.log('Border turned off and opacity set to 100% for pasted image');
         
-        // Update cursor now that we have image content
         updateCursor();
         
         // Use the logical dimensions which should be DPI-adjusted
@@ -1237,16 +1307,236 @@ document.addEventListener('keydown', async (event) => {
       console.error('Error pasting from clipboard:', error);
     }
   }
-  // Check for Ctrl+I (invert image colors)
+  
+  // Handle Ctrl+X (crop to current view)
+  else if (event.ctrlKey && event.key.toLowerCase() === 'x') {
+    event.preventDefault();
+    console.log('Ctrl+X detected, cropping to current view...');
+    try {
+      // First capture current screenshot to determine crop area
+      const cropInfo = await ipcRenderer.invoke('capture-screenshot');
+      
+      if (cropInfo) {
+        console.log('Screenshot captured for cropping, now cropping window...');
+        const result = await ipcRenderer.invoke('crop-to-current-view', cropInfo);
+        
+        if (result && result.success) {
+          console.log('Crop to current view completed successfully');
+        } else {
+          console.error('Crop operation failed:', result);
+        }
+      } else {
+        console.error('Failed to capture screenshot for cropping');
+      }
+    } catch (error) {
+      console.error('Error cropping to current view:', error);
+    }
+  }
+  
+  // Handle Ctrl+B (toggle border)
+  else if (event.ctrlKey && event.key.toLowerCase() === 'b') {
+    event.preventDefault();
+    console.log('Ctrl+B detected, toggling border...');
+    try {
+      // Check if toggleBorder function exists
+      if (typeof toggleBorder === 'function') {
+        console.log('toggleBorder function found, calling it...');
+        toggleBorder();
+        console.log('Border toggle completed');
+      } else {
+        console.error('toggleBorder function not found!');
+      }
+    } catch (error) {
+      console.error('Error toggling border:', error);
+    }
+  }
+  
+  // Handle Ctrl+N (new window)
+  else if (event.ctrlKey && event.key.toLowerCase() === 'n') {
+    event.preventDefault();
+    console.log('Ctrl+N detected, creating new window...');
+    try {
+      await ipcRenderer.invoke('create-new-window');
+      console.log('New window created');
+    } catch (error) {
+      console.error('Error creating new window:', error);
+    }
+  }
+  
+  // Handle Ctrl+A (expand window to fill current display)
+  else if (event.ctrlKey && event.key.toLowerCase() === 'a') {
+    event.preventDefault();
+    console.log('Ctrl+A detected, expanding to fill display...');
+    try {
+      await ipcRenderer.invoke('expand-to-display');
+      console.log('Window expanded to fill display');
+    } catch (error) {
+      console.error('Error expanding to display:', error);
+    }
+  }
+  
+  // Handle Ctrl+S (save image)
+  else if (event.ctrlKey && event.key.toLowerCase() === 's') {
+    event.preventDefault();
+    console.log('Ctrl+S detected, saving image...');
+    try {
+      await ipcRenderer.invoke('save-image');
+      console.log('Image save completed');
+    } catch (error) {
+      console.error('Error saving image:', error);
+    }
+  }
+  
+  // Handle Ctrl+F (open image from file)
+  else if (event.ctrlKey && event.key.toLowerCase() === 'f') {
+    event.preventDefault();
+    console.log('Ctrl+F detected, opening file...');
+    try {
+      await ipcRenderer.invoke('open-image-file');
+      console.log('File open completed');
+    } catch (error) {
+      console.error('Error opening file:', error);
+    }
+  }
+  
+  // Handle Ctrl+G (greyscale)
+  else if (event.ctrlKey && event.key.toLowerCase() === 'g') {
+    event.preventDefault();
+    console.log('Ctrl+G detected, converting to greyscale...');
+    try {
+      await convertToGreyscale();
+      console.log('Greyscale conversion completed');
+    } catch (error) {
+      console.error('Error converting to greyscale:', error);
+    }
+  }
+  
+  // Handle Ctrl+H (minimize to system tray)
+  else if (event.ctrlKey && event.key.toLowerCase() === 'h') {
+    event.preventDefault();
+    console.log('Ctrl+H detected, minimizing to system tray...');
+    try {
+      await ipcRenderer.invoke('minimize-to-tray');
+      console.log('Minimized to system tray');
+    } catch (error) {
+      console.error('Error minimizing to tray:', error);
+    }
+  }
+  
+  // Handle Ctrl+Q (close all windows)
+  else if (event.ctrlKey && event.key.toLowerCase() === 'q') {
+    event.preventDefault();
+    console.log('Ctrl+Q detected, closing all windows...');
+    try {
+      await ipcRenderer.invoke('close-all-windows');
+      console.log('All windows closed');
+    } catch (error) {
+      console.error('Error closing all windows:', error);
+    }
+  }
+  
+  // Handle Ctrl+W (switch to next display)
+  else if (event.ctrlKey && event.key.toLowerCase() === 'w') {
+    event.preventDefault();
+    console.log('Ctrl+W detected, switching to next display...');
+    try {
+      await ipcRenderer.invoke('switch-to-next-display');
+      console.log('Switched to next display');
+    } catch (error) {
+      console.error('Error switching to next display:', error);
+    }
+  }
+  
+  // Handle Ctrl+I (invert image colors)
   else if (event.ctrlKey && event.key.toLowerCase() === 'i') {
-    event.preventDefault(); // Prevent default behavior
-    
+    event.preventDefault();
     console.log('Ctrl+I detected, inverting image colors...');
-    
     try {
       await invertImageColors();
+      console.log('Image inversion completed');
     } catch (error) {
       console.error('Error inverting image colors:', error);
+    }
+  }
+  
+  // Handle Ctrl+M (black and white)
+  else if (event.ctrlKey && event.key.toLowerCase() === 'm') {
+    event.preventDefault();
+    console.log('Ctrl+M detected, converting to black and white...');
+    try {
+      await convertToBlackAndWhite();
+      console.log('Black and white conversion completed');
+    } catch (error) {
+      console.error('Error converting to black and white:', error);
+    }
+  }
+  
+  // Handle Ctrl+0 (reset scale)
+  else if (event.ctrlKey && event.key === '0') {
+    event.preventDefault();
+    try {
+      await resetContentScale();
+      console.log('Content scale reset triggered');
+    } catch (error) {
+      console.error('Error resetting content scale:', error);
+    }
+  }
+  
+  // Handle Ctrl+Z (undo)
+  else if (event.ctrlKey && event.key.toLowerCase() === 'z') {
+    event.preventDefault();
+    console.log('Ctrl+Z detected, undoing last operation...');
+    try {
+      await undoLastOperation();
+      console.log('Undo operation completed');
+    } catch (error) {
+      console.error('Error during undo operation:', error);
+    }
+  }
+  
+  // Handle arrow keys for fine positioning
+  else if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {
+    if (event.ctrlKey || event.shiftKey) {
+      event.preventDefault();
+      
+      // For Ctrl+Arrow: always 1 pixel movement (precise content nudging)
+      // For Shift+Arrow: use device pixel ratio for window movement
+      const pixelDelta = event.ctrlKey && !event.shiftKey ? 1 : Math.max(1, Math.round(window.devicePixelRatio));
+      
+      let deltaX = 0, deltaY = 0;
+      switch(event.key) {
+        case 'ArrowLeft':
+          deltaX = -pixelDelta;
+          break;
+        case 'ArrowRight':
+          deltaX = pixelDelta;
+          break;
+        case 'ArrowUp':
+          deltaY = -pixelDelta;
+          break;
+        case 'ArrowDown':
+          deltaY = pixelDelta;
+          break;
+      }
+      
+      console.log(`Arrow key: ${event.key}, deltaX: ${deltaX}, deltaY: ${deltaY}, Ctrl: ${event.ctrlKey}, Shift: ${event.shiftKey}, pixelDelta: ${pixelDelta}`);
+      
+      try {
+        if (event.ctrlKey && event.shiftKey) {
+          // Ctrl+Shift+Arrow: Move both window and content
+          await adjustWindowPosition(deltaX, deltaY);
+          adjustContentPosition(deltaX, deltaY);
+        } else if (event.shiftKey && !event.ctrlKey) {
+          // Shift+Arrow: Move window only
+          await adjustWindowPosition(deltaX, deltaY);
+        } else if (event.ctrlKey && !event.shiftKey) {
+          // Ctrl+Arrow: Move content only (1 pixel precision)
+          adjustContentPosition(deltaX, deltaY);
+          console.log(`Content nudged by exactly ${deltaX}, ${deltaY} pixels`);
+        }
+      } catch (error) {
+        console.error('Error adjusting position:', error);
+      }
     }
   }
 });
@@ -1566,64 +1856,6 @@ async function invertImageColors() {
   }
 }
 
-// Keyboard event handler for shortcuts and positioning
-document.addEventListener('keydown', async (event) => {
-  // Handle Ctrl+0 for reset
-  if (event.ctrlKey && event.key === '0') {
-    event.preventDefault();
-    try {
-      await ipcRenderer.invoke('reset-content-scale');
-      console.log('Content scale reset triggered');
-    } catch (error) {
-      console.error('Error resetting content scale:', error);
-    }
-  }
-  
-  // Handle arrow keys for fine positioning
-  if (['ArrowUp', 'ArrowDown', 'ArrowLeft', 'ArrowRight'].includes(event.key)) {
-    if (event.ctrlKey || event.shiftKey) {
-      event.preventDefault();
-      
-      // Calculate delta based on device pixel ratio
-      const pixelDelta = Math.max(1, Math.round(window.devicePixelRatio));
-      
-      let deltaX = 0, deltaY = 0;
-      switch(event.key) {
-        case 'ArrowLeft':
-          deltaX = -pixelDelta;
-          break;
-        case 'ArrowRight':
-          deltaX = pixelDelta;
-          break;
-        case 'ArrowUp':
-          deltaY = -pixelDelta;
-          break;
-        case 'ArrowDown':
-          deltaY = pixelDelta;
-          break;
-      }
-      
-      console.log(`Arrow key: ${event.key}, deltaX: ${deltaX}, deltaY: ${deltaY}, Ctrl: ${event.ctrlKey}, Shift: ${event.shiftKey}`);
-      
-      try {
-        if (event.ctrlKey && event.shiftKey) {
-          // Ctrl+Shift+Arrow: Move both window and content
-          await adjustWindowPosition(deltaX, deltaY);
-          adjustContentPosition(deltaX, deltaY);
-        } else if (event.shiftKey && !event.ctrlKey) {
-          // Shift+Arrow: Move window only
-          await adjustWindowPosition(deltaX, deltaY);
-        } else if (event.ctrlKey && !event.shiftKey) {
-          // Ctrl+Arrow: Move content only
-          adjustContentPosition(deltaX, deltaY);
-        }
-      } catch (error) {
-        console.error('Error adjusting position:', error);
-      }
-    }
-  }
-});
-
 // Move window position using tracked coordinates (no system reads)
 // CRITICAL: This function eliminates drift by using pure math on tracked values
 // NEVER call getBounds() in this function - it breaks the drift-prevention system
@@ -1654,26 +1886,280 @@ async function adjustWindowPosition(deltaX, deltaY) {
 
 // Move content position
 function adjustContentPosition(deltaX, deltaY) {
-  const imageContainer = document.querySelector('.image-container');
-  if (!imageContainer) return;
+  const content = document.querySelector('.content');
+  if (!content) {
+    console.log('No .content element found for content adjustment');
+    return;
+  }
   
-  // Get current transform
-  const currentTransform = imageContainer.style.transform || '';
+  // Get current background position
+  const currentBgPos = getComputedStyle(content).backgroundPosition;
   let currentX = 0, currentY = 0;
   
-  const translateMatch = currentTransform.match(/translate\(([^,]+),\s*([^)]+)\)/);
-  if (translateMatch) {
-    currentX = parseFloat(translateMatch[1]) || 0;
-    currentY = parseFloat(translateMatch[2]) || 0;
+  // Parse background position (could be "0px 0px" or "left top" etc.)
+  if (currentBgPos && currentBgPos !== 'initial') {
+    const parts = currentBgPos.split(' ');
+    if (parts.length >= 2) {
+      currentX = parseFloat(parts[0]) || 0;
+      currentY = parseFloat(parts[1]) || 0;
+    }
   }
   
   // Apply delta
   const newX = currentX + deltaX;
   const newY = currentY + deltaY;
   
-  // Update transform
-  const otherTransforms = currentTransform.replace(/translate\([^)]*\)/, '').trim();
-  imageContainer.style.transform = `translate(${newX}px, ${newY}px) ${otherTransforms}`.trim();
+  // Update background position
+  content.style.backgroundPosition = `${newX}px ${newY}px`;
   
-  console.log(`Content moved by (${deltaX}, ${deltaY}) to (${newX}, ${newY})`);
+  // Update tracked image offset
+  imageOffset.x = newX;
+  imageOffset.y = newY;
+  
+  console.log(`Content background moved by (${deltaX}, ${deltaY}) to (${newX}, ${newY})`);
+}
+
+// Convert image to greyscale (Ctrl+G)
+async function convertToGreyscale() {
+  try {
+    const content = document.querySelector('.content');
+    const backgroundImage = getComputedStyle(content).backgroundImage;
+    
+    if (!backgroundImage || backgroundImage === 'none') {
+      console.log('No image available for greyscale conversion');
+      return;
+    }
+    
+    console.log('Converting image to greyscale...');
+    
+    // Get the current background image URL
+    const imageUrl = backgroundImage.slice(5, -2); // Remove 'url("' and '")'
+    const img = new Image();
+    
+    img.onload = () => {
+      try {
+        // Create canvas to process the image
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Set canvas size to image size
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        
+        // Draw the image onto the canvas
+        ctx.drawImage(img, 0, 0);
+        
+        // Get image data for pixel manipulation
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imageData.data;
+        
+        // Convert each pixel to greyscale using luminance formula
+        for (let i = 0; i < data.length; i += 4) {
+          const red = data[i];
+          const green = data[i + 1];
+          const blue = data[i + 2];
+          
+          // Calculate luminance (perceived brightness)
+          const grey = Math.round(0.299 * red + 0.587 * green + 0.114 * blue);
+          
+          data[i] = grey;     // Red
+          data[i + 1] = grey; // Green
+          data[i + 2] = grey; // Blue
+          // data[i + 3] is alpha, leave unchanged
+        }
+        
+        // Put the modified image data back to canvas
+        ctx.putImageData(imageData, 0, 0);
+        
+        // Convert canvas to data URL
+        const greyDataUrl = canvas.toDataURL('image/png');
+        
+        // Apply the greyscale image as the new background
+        content.style.backgroundImage = `url(${greyDataUrl})`;
+        
+        updateCursor();
+        
+        console.log('Image converted to greyscale successfully');
+        
+      } catch (error) {
+        console.error('Error processing image for greyscale conversion:', error);
+      }
+    };
+    
+    img.onerror = () => {
+      console.error('Failed to load image for greyscale conversion');
+    };
+    
+    img.src = imageUrl;
+    
+  } catch (error) {
+    console.error('Error setting up greyscale conversion:', error);
+  }
+}
+
+// Convert image to black and white with threshold (Ctrl+M)
+async function convertToBlackAndWhite() {
+  try {
+    const content = document.querySelector('.content');
+    const backgroundImage = getComputedStyle(content).backgroundImage;
+    
+    if (!backgroundImage || backgroundImage === 'none') {
+      console.log('No image available for black and white conversion');
+      return;
+    }
+    
+    console.log('Converting image to black and white...');
+    
+    // Get the current background image URL
+    const imageUrl = backgroundImage.slice(5, -2); // Remove 'url("' and '")'
+    const img = new Image();
+    
+    img.onload = () => {
+      try {
+        // Create canvas to process the image
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        
+        // Set canvas size to image size
+        canvas.width = img.naturalWidth;
+        canvas.height = img.naturalHeight;
+        
+        // Draw the image onto the canvas
+        ctx.drawImage(img, 0, 0);
+        
+        // Get image data for pixel manipulation
+        const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+        const data = imageData.data;
+        
+        // Convert each pixel to black or white using threshold
+        const threshold = 128; // Middle threshold
+        
+        for (let i = 0; i < data.length; i += 4) {
+          const red = data[i];
+          const green = data[i + 1];
+          const blue = data[i + 2];
+          
+          // Calculate luminance (perceived brightness)
+          const grey = Math.round(0.299 * red + 0.587 * green + 0.114 * blue);
+          
+          // Apply threshold: above threshold = white, below = black
+          const bw = grey >= threshold ? 255 : 0;
+          
+          data[i] = bw;     // Red
+          data[i + 1] = bw; // Green
+          data[i + 2] = bw; // Blue
+          // data[i + 3] is alpha, leave unchanged
+        }
+        
+        // Put the modified image data back to canvas
+        ctx.putImageData(imageData, 0, 0);
+        
+        // Convert canvas to data URL
+        const bwDataUrl = canvas.toDataURL('image/png');
+        
+        // Apply the black and white image as the new background
+        content.style.backgroundImage = `url(${bwDataUrl})`;
+        
+        updateCursor();
+        
+        console.log('Image converted to black and white successfully');
+        
+      } catch (error) {
+        console.error('Error processing image for black and white conversion:', error);
+      }
+    };
+    
+    img.onerror = () => {
+      console.error('Failed to load image for black and white conversion');
+    };
+    
+    img.src = imageUrl;
+    
+  } catch (error) {
+    console.error('Error setting up black and white conversion:', error);
+  }
+}
+
+// Toggle border visibility (Ctrl+B)
+function toggleBorder() {
+  try {
+    const body = document.querySelector('body');
+    
+    console.log(`[${Date.now()}] Border toggle requested`);
+    
+    // Check current border state using CSS class system
+    const hasBorderHidden = body.classList.contains('border-hidden');
+    
+    console.log(`  Current state: border-hidden class ${hasBorderHidden ? 'present' : 'not present'}`);
+    console.log(`  Border is currently: ${hasBorderHidden ? 'OFF' : 'ON'}`);
+    
+    if (hasBorderHidden) {
+      // Border is hidden, show it
+      body.classList.remove('border-hidden');
+      console.log(`[${Date.now()}] Border turned ON (removed border-hidden class)`);
+    } else {
+      // Border is visible, hide it
+      body.classList.add('border-hidden');
+      console.log(`[${Date.now()}] Border turned OFF (added border-hidden class)`);
+    }
+    
+    // Force a small delay and update cursor to ensure changes take effect
+    setTimeout(() => {
+      updateCursor();
+    }, 10);
+    
+  } catch (error) {
+    console.error('Error toggling border:', error);
+  }
+}
+
+// Reset content scale to 1:1 (Ctrl+0)
+async function resetContentScale() {
+  try {
+    console.log('Resetting content scale to 1:1...');
+    
+    const content = document.querySelector('.content');
+    const imageContainer = document.querySelector('.image-container');
+    
+    if (!content) {
+      console.log('No content element found');
+      return;
+    }
+    
+    // Reset background size to original dimensions
+    if (originalImageWidth && originalImageHeight) {
+      content.style.backgroundSize = `${originalImageWidth}px ${originalImageHeight}px`;
+      currentImageScale = 1.0;
+      console.log(`Content scale reset to 1:1 (${originalImageWidth}x${originalImageHeight}px)`);
+    }
+    
+    // Reset image container transform if it exists
+    if (imageContainer) {
+      imageContainer.style.transform = '';
+      console.log('Image container transform reset');
+    }
+    
+    // Reset content position to original
+    if (originalPositionX !== undefined && originalPositionY !== undefined) {
+      content.style.backgroundPosition = `${originalPositionX}px ${originalPositionY}px`;
+      imageOffset = { x: originalPositionX, y: originalPositionY };
+      console.log(`Content position reset to (${originalPositionX}, ${originalPositionY})`);
+    }
+    
+    updateCursor();
+    
+  } catch (error) {
+    console.error('Error resetting content scale:', error);
+  }
+}
+
+// Undo last operation (Ctrl+Z) - placeholder for future implementation
+async function undoLastOperation() {
+  try {
+    console.log('Undo operation requested - not yet implemented');
+    // TODO: Implement undo functionality with operation history
+    
+  } catch (error) {
+    console.error('Error during undo operation:', error);
+  }
 }

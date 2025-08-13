@@ -1,9 +1,11 @@
-const { app, BrowserWindow, Menu, ipcMain, screen, nativeImage, desktopCapturer, clipboard, dialog } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, screen, nativeImage, desktopCapturer, clipboard, dialog, Tray } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
 let mainWindow;
 let windows = []; // Array to track all windows
+let tray = null; // System tray instance
+let isQuitting = false; // Track if app is quitting to prevent tray restore
 
 // Track window position and dimensions to prevent drift
 // These are the single source of truth - never read back from system
@@ -19,6 +21,7 @@ function createWindow() {
     frame: false,
     resizable: true,
     backgroundColor: '#00000000',
+    alwaysOnTop: true, // Make window always on top
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: false,
@@ -957,10 +960,305 @@ TIPS:
   }
 });
 
-app.on('ready', createWindow);
+// IPC handler for expanding window to fill current display (Ctrl+A)
+ipcMain.handle('expand-to-display', async (event) => {
+  try {
+    const senderWindow = BrowserWindow.fromWebContents(event.sender);
+    if (!senderWindow) {
+      throw new Error('Sender window not found');
+    }
+    
+    // Get the current window bounds to find which display it's on
+    const windowBounds = senderWindow.getBounds();
+    const currentDisplay = screen.getDisplayMatching(windowBounds);
+    const { x, y, width, height } = currentDisplay.workArea;
+    
+    console.log(`Expanding window to fill display: ${width}x${height} at (${x}, ${y})`);
+    
+    // Set the window bounds to fill the display work area
+    senderWindow.setBounds({ x, y, width, height });
+    
+    // Update our tracking state
+    const windowId = senderWindow.id;
+    windowStates.set(windowId, { x, y, width, height });
+    
+    // Tell renderer to realign content to top-left
+    senderWindow.webContents.send('realign-content-to-top-left');
+    
+    return { success: true, bounds: { x, y, width, height } };
+  } catch (error) {
+    console.error('Failed to expand to display:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// IPC handler for saving image (Ctrl+S) - use existing logic
+ipcMain.handle('save-image', async (event) => {
+  try {
+    const senderWindow = BrowserWindow.fromWebContents(event.sender);
+    if (!senderWindow) {
+      throw new Error('Sender window not found');
+    }
+
+    const { dialog } = require('electron');
+    const fs = require('fs');
+    const path = require('path');
+
+    // Show save dialog
+    const result = await dialog.showSaveDialog(senderWindow, {
+      title: 'Save Image',
+      defaultPath: 'screenshot.png',
+      filters: [
+        { name: 'PNG Images', extensions: ['png'] },
+        { name: 'JPEG Images', extensions: ['jpg', 'jpeg'] },
+        { name: 'All Files', extensions: ['*'] }
+      ]
+    });
+
+    if (result.canceled) {
+      return { success: false, canceled: true };
+    }
+
+    const filePath = result.filePath;
+    console.log('Saving image to:', filePath);
+
+    // Capture the current window content
+    const screenshot = await senderWindow.capturePage();
+    const buffer = screenshot.toPNG();
+
+    // Save the file
+    fs.writeFileSync(filePath, buffer);
+    console.log('Image saved successfully to:', filePath);
+
+    return { success: true, filePath: filePath };
+  } catch (error) {
+    console.error('Failed to save image:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// IPC handler for opening image file (Ctrl+F) - use existing logic
+ipcMain.handle('open-image-file', async (event) => {
+  try {
+    const senderWindow = BrowserWindow.fromWebContents(event.sender);
+    if (!senderWindow) {
+      throw new Error('Sender window not found');
+    }
+
+    const { dialog } = require('electron');
+    const fs = require('fs');
+    const path = require('path');
+
+    // Show open dialog
+    const result = await dialog.showOpenDialog(senderWindow, {
+      title: 'Open Image File',
+      filters: [
+        { name: 'Images', extensions: ['png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp'] },
+        { name: 'All Files', extensions: ['*'] }
+      ],
+      properties: ['openFile']
+    });
+
+    if (result.canceled || result.filePaths.length === 0) {
+      return { success: false, canceled: true };
+    }
+
+    const filePath = result.filePaths[0];
+    console.log('Loading image from:', filePath);
+
+    // Read the file and convert to data URL
+    const fileData = fs.readFileSync(filePath);
+    const fileExtension = path.extname(filePath).toLowerCase();
+    
+    let mimeType = 'image/png';
+    if (fileExtension === '.jpg' || fileExtension === '.jpeg') {
+      mimeType = 'image/jpeg';
+    } else if (fileExtension === '.gif') {
+      mimeType = 'image/gif';
+    } else if (fileExtension === '.bmp') {
+      mimeType = 'image/bmp';
+    } else if (fileExtension === '.webp') {
+      mimeType = 'image/webp';
+    }
+
+    const dataUrl = `data:${mimeType};base64,${fileData.toString('base64')}`;
+
+    // Load the image to get dimensions
+    const { nativeImage } = require('electron');
+    const image = nativeImage.createFromPath(filePath);
+    const size = image.getSize();
+
+    console.log(`Image loaded: ${size.width}x${size.height}px`);
+
+    return {
+      success: true,
+      dataUrl: dataUrl,
+      width: size.width,
+      height: size.height,
+      filePath: filePath
+    };
+  } catch (error) {
+    console.error('Failed to load image file:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// IPC handler for switching to next display (Ctrl+W)
+ipcMain.handle('switch-to-next-display', async (event) => {
+  try {
+    const senderWindow = BrowserWindow.fromWebContents(event.sender);
+    if (!senderWindow) {
+      throw new Error('Sender window not found');
+    }
+    
+    const allDisplays = screen.getAllDisplays();
+    const windowBounds = senderWindow.getBounds();
+    const currentDisplay = screen.getDisplayMatching(windowBounds);
+    
+    // Find the current display index
+    const currentIndex = allDisplays.findIndex(display => display.id === currentDisplay.id);
+    
+    // Get the next display (wrap around to first if at end)
+    const nextIndex = (currentIndex + 1) % allDisplays.length;
+    const nextDisplay = allDisplays[nextIndex];
+    
+    // Calculate relative position within current display
+    const relativeX = (windowBounds.x - currentDisplay.bounds.x) / currentDisplay.bounds.width;
+    const relativeY = (windowBounds.y - currentDisplay.bounds.y) / currentDisplay.bounds.height;
+    
+    // Calculate new position on next display
+    const newX = Math.round(nextDisplay.bounds.x + (relativeX * nextDisplay.bounds.width));
+    const newY = Math.round(nextDisplay.bounds.y + (relativeY * nextDisplay.bounds.height));
+    
+    // Keep the same window size
+    const newBounds = {
+      x: newX,
+      y: newY,
+      width: windowBounds.width,
+      height: windowBounds.height
+    };
+    
+    console.log(`Switching window from display ${currentIndex} to display ${nextIndex}`);
+    console.log(`Old position: (${windowBounds.x}, ${windowBounds.y}) on display ${currentDisplay.bounds.width}x${currentDisplay.bounds.height}`);
+    console.log(`New position: (${newX}, ${newY}) on display ${nextDisplay.bounds.width}x${nextDisplay.bounds.height}`);
+    
+    senderWindow.setBounds(newBounds);
+    
+    // Update our tracking state
+    const windowId = senderWindow.id;
+    windowStates.set(windowId, newBounds);
+    
+    return { success: true, bounds: newBounds, displayIndex: nextIndex };
+  } catch (error) {
+    console.error('Failed to switch to next display:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// IPC handler for converting to black and white (Ctrl+M)
+ipcMain.handle('convert-black-white', async (event) => {
+  try {
+    console.log('Converting image to black and white...');
+    // This operation will be handled in the renderer since it's a CSS filter operation
+    // Just return success to indicate the command was received
+    return { success: true };
+  } catch (error) {
+    console.error('Failed to convert to black and white:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// IPC handler for resetting content scale (Ctrl+0)
+ipcMain.handle('reset-content-scale', async (event) => {
+  try {
+    console.log('Resetting content scale to 1:1...');
+    // This operation will be handled in the renderer since it involves DOM manipulation
+    // Just return success to indicate the command was received
+    return { success: true };
+  } catch (error) {
+    console.error('Failed to reset content scale:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// IPC handler for minimizing to system tray (Ctrl+H)
+ipcMain.handle('minimize-to-tray', async (event) => {
+  try {
+    const allWindows = BrowserWindow.getAllWindows();
+    
+    // Hide all windows
+    allWindows.forEach(window => {
+      if (!window.isDestroyed()) {
+        window.hide();
+      }
+    });
+    
+    console.log(`Minimized ${allWindows.length} windows to system tray`);
+    return { success: true, windowCount: allWindows.length };
+  } catch (error) {
+    console.error('Failed to minimize to tray:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// Create system tray
+function createTray() {
+  // Create a simple icon for the tray (you can replace with an actual icon file)
+  const icon = nativeImage.createFromDataURL('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==');
+  
+  tray = new Tray(icon);
+  
+  const contextMenu = Menu.buildFromTemplate([
+    {
+      label: 'Restore All Windows',
+      click: () => {
+        const allWindows = BrowserWindow.getAllWindows();
+        allWindows.forEach(window => {
+          if (!window.isDestroyed()) {
+            window.show();
+          }
+        });
+      }
+    },
+    {
+      label: 'New Window',
+      click: () => {
+        createWindow();
+      }
+    },
+    { type: 'separator' },
+    {
+      label: 'Quit ScreenClip',
+      click: () => {
+        isQuitting = true;
+        app.quit();
+      }
+    }
+  ]);
+  
+  tray.setToolTip('ScreenClip');
+  tray.setContextMenu(contextMenu);
+  
+  // Double-click to restore all windows
+  tray.on('double-click', () => {
+    const allWindows = BrowserWindow.getAllWindows();
+    allWindows.forEach(window => {
+      if (!window.isDestroyed()) {
+        window.show();
+      }
+    });
+  });
+}
+
+app.on('ready', () => {
+  createWindow();
+  createTray();
+});
 
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') {
+  // Don't quit when all windows are closed if we have a tray
+  // This allows the app to continue running in the tray
+  if (process.platform !== 'darwin' && isQuitting) {
     app.quit();
   }
 });
