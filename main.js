@@ -64,48 +64,225 @@ function createWindow() {
   const contextMenu = Menu.buildFromTemplate([
     {
       label: 'Copy (Ctrl+C)',
+      accelerator: 'CmdOrCtrl+C',
       click: () => {
-        newWindow.webContents.send('menu-copy');
+        // Trigger the same action as Ctrl+C keyboard shortcut
+        newWindow.webContents.executeJavaScript(`
+          document.dispatchEvent(new KeyboardEvent('keydown', {
+            key: 'c',
+            ctrlKey: true,
+            bubbles: true
+          }));
+        `);
       }
     },
     {
       label: 'Paste (Ctrl+V)',
+      accelerator: 'CmdOrCtrl+V',
       click: () => {
-        newWindow.webContents.send('menu-paste');
+        // Trigger the same action as Ctrl+V keyboard shortcut
+        newWindow.webContents.executeJavaScript(`
+          document.dispatchEvent(new KeyboardEvent('keydown', {
+            key: 'v',
+            ctrlKey: true,
+            bubbles: true
+          }));
+        `);
       }
     },
     { type: 'separator' },
     {
-      label: 'Load Image from File...',
+      label: 'Crop to Current View (Ctrl+X)',
+      accelerator: 'CmdOrCtrl+X',
       click: () => {
-        newWindow.webContents.send('menu-load-file');
+        // Trigger the same action as Ctrl+X keyboard shortcut
+        newWindow.webContents.executeJavaScript(`
+          document.dispatchEvent(new KeyboardEvent('keydown', {
+            key: 'x',
+            ctrlKey: true,
+            bubbles: true
+          }));
+        `);
       }
     },
     {
-      label: 'Save Image to File...',
+      label: 'Toggle Border (Ctrl+B)',
+      accelerator: 'CmdOrCtrl+B',
       click: () => {
-        newWindow.webContents.send('menu-save-file');
+        // Trigger the same action as Ctrl+B keyboard shortcut
+        newWindow.webContents.executeJavaScript(`
+          document.dispatchEvent(new KeyboardEvent('keydown', {
+            key: 'b',
+            ctrlKey: true,
+            bubbles: true
+          }));
+        `);
       }
     },
     { type: 'separator' },
     {
-      label: 'Toggle Border Visibility',
+      label: 'Open Image File (Ctrl+F)',
+      accelerator: 'CmdOrCtrl+F',
       click: () => {
-        newWindow.webContents.send('toggle-border');
+        // Trigger the same action as Ctrl+F keyboard shortcut
+        newWindow.webContents.executeJavaScript(`
+          document.dispatchEvent(new KeyboardEvent('keydown', {
+            key: 'f',
+            ctrlKey: true,
+            bubbles: true
+          }));
+        `);
       }
     },
     {
-      label: 'Reset Image',
+      label: 'Save Image (Ctrl+S)',
+      accelerator: 'CmdOrCtrl+S',
       click: () => {
-        newWindow.webContents.send('reset-scale');
+        // Trigger the same action as Ctrl+S keyboard shortcut
+        newWindow.webContents.executeJavaScript(`
+          document.dispatchEvent(new KeyboardEvent('keydown', {
+            key: 's',
+            ctrlKey: true,
+            bubbles: true
+          }));
+        `);
       }
+    },
+    { type: 'separator' },
+    {
+      label: 'Image Effects',
+      submenu: [
+        {
+          label: 'Greyscale (Ctrl+G)',
+          accelerator: 'CmdOrCtrl+G',
+          click: () => {
+            newWindow.webContents.executeJavaScript(`
+              document.dispatchEvent(new KeyboardEvent('keydown', {
+                key: 'g',
+                ctrlKey: true,
+                bubbles: true
+              }));
+            `);
+          }
+        },
+        {
+          label: 'Invert Colors (Ctrl+I)',
+          accelerator: 'CmdOrCtrl+I',
+          click: () => {
+            newWindow.webContents.executeJavaScript(`
+              document.dispatchEvent(new KeyboardEvent('keydown', {
+                key: 'i',
+                ctrlKey: true,
+                bubbles: true
+              }));
+            `);
+          }
+        },
+        {
+          label: 'Black & White (Ctrl+M)',
+          accelerator: 'CmdOrCtrl+M',
+          click: () => {
+            newWindow.webContents.executeJavaScript(`
+              document.dispatchEvent(new KeyboardEvent('keydown', {
+                key: 'm',
+                ctrlKey: true,
+                bubbles: true
+              }));
+            `);
+          }
+        }
+      ]
     },
     {
-      label: 'Crop to Current View',
-      click: () => {
-        newWindow.webContents.send('crop-to-view');
-      }
+      label: 'Scale & Position',
+      submenu: [
+        {
+          label: 'Reset Scale (Ctrl+0)',
+          accelerator: 'CmdOrCtrl+0',
+          click: () => {
+            newWindow.webContents.executeJavaScript(`
+              document.dispatchEvent(new KeyboardEvent('keydown', {
+                key: '0',
+                ctrlKey: true,
+                bubbles: true
+              }));
+            `);
+          }
+        },
+        {
+          label: 'Expand to Display (Ctrl+A)',
+          accelerator: 'CmdOrCtrl+A',
+          click: () => {
+            newWindow.webContents.executeJavaScript(`
+              document.dispatchEvent(new KeyboardEvent('keydown', {
+                key: 'a',
+                ctrlKey: true,
+                bubbles: true
+              }));
+            `);
+          }
+        }
+      ]
     },
+    {
+      label: 'Window',
+      submenu: [
+        {
+          label: 'New Window (Ctrl+N)',
+          accelerator: 'CmdOrCtrl+N',
+          click: () => {
+            newWindow.webContents.executeJavaScript(`
+              document.dispatchEvent(new KeyboardEvent('keydown', {
+                key: 'n',
+                ctrlKey: true,
+                bubbles: true
+              }));
+            `);
+          }
+        },
+        {
+          label: 'Switch to Next Display (Ctrl+W)',
+          accelerator: 'CmdOrCtrl+W',
+          click: () => {
+            newWindow.webContents.executeJavaScript(`
+              document.dispatchEvent(new KeyboardEvent('keydown', {
+                key: 'w',
+                ctrlKey: true,
+                bubbles: true
+              }));
+            `);
+          }
+        },
+        {
+          label: 'Minimize to Tray (Ctrl+H)',
+          accelerator: 'CmdOrCtrl+H',
+          click: () => {
+            newWindow.webContents.executeJavaScript(`
+              document.dispatchEvent(new KeyboardEvent('keydown', {
+                key: 'h',
+                ctrlKey: true,
+                bubbles: true
+              }));
+            `);
+          }
+        },
+        { type: 'separator' },
+        {
+          label: 'Close All Windows (Ctrl+Q)',
+          accelerator: 'CmdOrCtrl+Q',
+          click: () => {
+            newWindow.webContents.executeJavaScript(`
+              document.dispatchEvent(new KeyboardEvent('keydown', {
+                key: 'q',
+                ctrlKey: true,
+                bubbles: true
+              }));
+            `);
+          }
+        }
+      ]
+    },
+    { type: 'separator' },
     {
       label: 'Transparentize Color',
       submenu: [
