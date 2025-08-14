@@ -121,6 +121,20 @@ function createWindow() {
     },
     { type: 'separator' },
     {
+      label: 'Extract Text (OCR) (Ctrl+T)',
+      accelerator: 'CmdOrCtrl+T',
+      click: () => {
+        // Trigger the same action as Ctrl+T keyboard shortcut
+        newWindow.webContents.executeJavaScript(`
+          document.dispatchEvent(new KeyboardEvent('keydown', {
+            key: 't',
+            ctrlKey: true,
+            bubbles: true
+          }));
+        `);
+      }
+    },
+    {
       label: 'Open Image File (Ctrl+F)',
       accelerator: 'CmdOrCtrl+F',
       click: () => {
@@ -1078,6 +1092,7 @@ ipcMain.handle('show-help-dialog', async (event) => {
 • Scaling & Positioning: Zoom and move images with mouse controls
 • Crop to View: Resize window to fit visible image content
 • Transparentize Color: Remove backgrounds by clicking on colors
+• OCR Text Extraction: Extract text from images using offline OCR
 • Drag & Drop: Drop image files directly onto the window
 
 CONTROLS:
@@ -1093,10 +1108,12 @@ CONTROLS:
 • Left Double-Click: Capture screenshot
 • Ctrl+C: Copy current view to clipboard
 • Ctrl+V: Paste image from clipboard
+• Ctrl+T: Extract text from image (OCR) and copy to clipboard
 • Ctrl+I: Invert image colors (helps with OCR on dark backgrounds)
 
 CONTEXT MENU:
 • Copy/Paste: Clipboard operations with DPI awareness
+• Extract Text (OCR): Extract text from current image and copy to clipboard
 • Load/Save: File operations for images
 • Toggle Border: Show/hide red window border
 • Reset Image: Return to original size and position
@@ -1121,7 +1138,14 @@ AUTO-CROP FEATURE:
 Window automatically crops to image content after scaling operations
 (debounced to prevent performance issues)
 
-TIPS:
+OCR TIPS:
+• Use Ctrl+I to invert colors for better text recognition on dark backgrounds
+• Ensure text is clearly visible and not too small for best OCR results
+• OCR works offline using Tesseract.js - no internet connection required
+• Extracted text is automatically copied to clipboard
+• Clean, high-contrast images work best for text recognition
+
+GENERAL TIPS:
 • Use low tolerance for solid color backgrounds
 • Use high tolerance for gradients or anti-aliased edges
 • The tool preserves exact pixel accuracy across copy-paste cycles
@@ -1341,6 +1365,96 @@ ipcMain.handle('convert-black-white', async (event) => {
     return { success: true };
   } catch (error) {
     console.error('Failed to convert to black and white:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// IPC handler for OCR text extraction - processes OCR in main process
+ipcMain.handle('extract-text-ocr', async (event) => {
+  try {
+    const senderWindow = BrowserWindow.fromWebContents(event.sender);
+    if (!senderWindow) {
+      throw new Error('Could not find sender window');
+    }
+    
+    console.log('Starting OCR text extraction...');
+    
+    // Capture the current window contents (for OCR processing)
+    const image = await senderWindow.capturePage();
+    const imageSize = image.getSize();
+    
+    console.log(`OCR: Captured image ${imageSize.width}x${imageSize.height}px for text extraction`);
+    
+    // Load Tesseract.js in main process (Node.js environment)
+    const { createWorker } = require('tesseract.js');
+    
+    console.log('Initializing Tesseract OCR worker in main process...');
+    
+    // Create worker - should work properly in Node.js main process
+    const worker = await createWorker('eng', 1, {
+      logger: m => {
+        if (m.status === 'recognizing text') {
+          console.log(`OCR Progress: ${Math.round(m.progress * 100)}%`);
+        } else {
+          console.log('OCR:', m.status);
+        }
+      }
+    });
+    
+    console.log('Processing image with OCR in main process...');
+    
+    // Convert image to buffer for Tesseract
+    const imageBuffer = image.toPNG();
+    
+    // Process with Tesseract
+    const { data: { text } } = await worker.recognize(imageBuffer);
+    
+    // Clean up the worker
+    await worker.terminate();
+    
+    console.log('OCR processing completed in main process');
+    
+    // Clean up the extracted text
+    const cleanText = text.replace(/\s+/g, ' ').trim();
+    
+    if (!cleanText) {
+      return { 
+        success: false, 
+        error: 'No text detected in the image' 
+      };
+    }
+    
+    console.log(`OCR: Successfully extracted ${cleanText.length} characters`);
+    console.log('OCR text preview:', cleanText.substring(0, 100) + (cleanText.length > 100 ? '...' : ''));
+    
+    return { 
+      success: true, 
+      text: cleanText,
+      textLength: cleanText.length
+    };
+    
+  } catch (error) {
+    console.error('Failed to extract text with OCR in main process:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// IPC handler for copying OCR text to clipboard
+ipcMain.handle('copy-ocr-text', async (event, text) => {
+  try {
+    if (!text || typeof text !== 'string') {
+      throw new Error('Invalid text provided for clipboard');
+    }
+    
+    // Copy the extracted text to clipboard
+    clipboard.writeText(text);
+    
+    console.log(`OCR: Copied ${text.length} characters to clipboard`);
+    console.log('OCR text preview:', text.substring(0, 100) + (text.length > 100 ? '...' : ''));
+    
+    return { success: true, textLength: text.length };
+  } catch (error) {
+    console.error('Failed to copy OCR text to clipboard:', error);
     return { success: false, error: error.message };
   }
 });

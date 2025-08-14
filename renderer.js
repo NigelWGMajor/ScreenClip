@@ -1482,6 +1482,18 @@ document.addEventListener('keydown', async (event) => {
     }
   }
   
+  // Handle Ctrl+T (OCR text extraction)
+  else if (event.ctrlKey && event.key.toLowerCase() === 't') {
+    event.preventDefault();
+    console.log('Ctrl+T detected, extracting text with OCR...');
+    try {
+      await extractTextWithOCR();
+      console.log('OCR text extraction completed');
+    } catch (error) {
+      console.error('Error during OCR text extraction:', error);
+    }
+  }
+  
   // Handle Ctrl+Z (undo)
   else if (event.ctrlKey && event.key.toLowerCase() === 'z') {
     event.preventDefault();
@@ -2150,6 +2162,73 @@ async function resetContentScale() {
     
   } catch (error) {
     console.error('Error resetting content scale:', error);
+  }
+}
+
+// Extract text from current image using OCR (Ctrl+T)
+async function extractTextWithOCR() {
+  try {
+    const content = document.querySelector('.content');
+    const backgroundImage = getComputedStyle(content).backgroundImage;
+    
+    // Check if there's an image to process
+    if (!backgroundImage || backgroundImage === 'none') {
+      console.log('No image available for OCR text extraction');
+      alert('No image available for OCR text extraction. Please load an image first.');
+      return;
+    }
+    
+    console.log('Starting OCR text extraction process...');
+    
+    // Show processing cursor
+    document.body.style.cursor = 'wait';
+    
+    try {
+      // Process OCR in main process (handles Tesseract.js properly)
+      const ocrResult = await ipcRenderer.invoke('extract-text-ocr');
+      
+      if (!ocrResult.success) {
+        throw new Error(ocrResult.error || 'Failed to process OCR');
+      }
+      
+      console.log(`OCR processing completed: ${ocrResult.textLength} characters extracted`);
+      
+      // Copy the extracted text to clipboard
+      const copyResult = await ipcRenderer.invoke('copy-ocr-text', ocrResult.text);
+      
+      if (copyResult.success) {
+        console.log(`OCR: Successfully copied ${copyResult.textLength} characters to clipboard`);
+        
+        // Show success feedback with text cursor
+        document.body.style.cursor = 'text';
+        
+        // Show a brief notification
+        const notification = `OCR Complete!\n${copyResult.textLength} characters copied to clipboard`;
+        alert(notification);
+        
+        // Reset cursor after a delay
+        setTimeout(() => {
+          updateCursor();
+        }, 2000);
+        
+      } else {
+        throw new Error(copyResult.error || 'Failed to copy text to clipboard');
+      }
+      
+    } catch (error) {
+      console.error('OCR processing error:', error);
+      alert(`OCR Error: ${error.message}`);
+    } finally {
+      // Reset cursor
+      if (document.body.style.cursor === 'wait') {
+        updateCursor();
+      }
+    }
+    
+  } catch (error) {
+    console.error('Error setting up OCR text extraction:', error);
+    alert(`OCR Setup Error: ${error.message}`);
+    updateCursor();
   }
 }
 
