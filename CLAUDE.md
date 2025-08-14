@@ -148,6 +148,39 @@ npm run dist            # Build without publishing
 
 **Rule**: Border offsets cause pixel-perfect alignment issues. Use actual window bounds.
 
+## CRITICAL: DO NOT BREAK EXISTING SYSTEMS
+
+⚠️ **WARNING: The following systems are working correctly and are extremely fragile. DO NOT MODIFY unless explicitly requested:**
+
+### Image Scaling & Positioning Systems (DO NOT TOUCH)
+- **`imageOffset` tracking**: Global position state management
+- **`backgroundPosition` calculations**: CSS positioning logic  
+- **`backgroundSize` scaling logic**: DPI-aware image sizing
+- **`currentImageScale` tracking**: Scale factor management
+- **Mouse wheel scaling**: Center-point scaling calculations
+- **Drag & pan operations**: Position delta calculations
+
+### DPI & Coordinate Systems (DO NOT TOUCH)
+- **`scaleFactor` calculations**: Display DPI handling
+- **Physical/logical pixel conversions**: Screen coordinate translations
+- **Window bounds tracking**: Position state management
+- **Multi-monitor positioning**: Display-aware coordinate systems
+
+### Copy-Paste & Screenshot Pipeline (DO NOT TOUCH)
+- **Screenshot capture positioning**: Pixel-perfect alignment systems
+- **Image offset compensation**: Drift prevention mechanisms
+- **Border handling**: Opacity vs display toggles
+- **Window resize logic**: Dimension tracking
+
+### General Rules for Modifications
+1. **Only modify the specific code block requested**
+2. **Never touch tracking variables unless explicitly asked**
+3. **Do not refactor working positioning/scaling logic**
+4. **Test screenshot, crop, pan, and scale after any changes**
+5. **If something breaks, revert immediately**
+
+**Remember**: These systems took significant effort to get pixel-perfect. Small changes can cause cascading failures in positioning, scaling, and DPI handling.
+
 ## Development Notes
 
 - **Context Isolation**: Disabled (`contextIsolation: false`) for direct IPC access
