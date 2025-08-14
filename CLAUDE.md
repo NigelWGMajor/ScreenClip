@@ -189,3 +189,7 @@ npm run dist            # Build without publishing
 - **Cross-Platform**: Build configurations for Windows, macOS, and Linux
 - **DPI Scaling**: Handles high-DPI displays with proper pixel calculations
 - **Positioning**: All coordinates use window bounds directly - no border compensations
+
+## Key Architectural Principles
+
+- **IMPORTANT**: In this application, all properties related to positions, scale, size and the like are persisted, and these values are only adjusted when an operation requires them to change. The state in the application is always the source of truth, the direction of data flow is always TO the physical display. No changes to the code should disturb or duplicate this state unnecessarily.

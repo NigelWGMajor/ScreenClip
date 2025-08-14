@@ -95,14 +95,8 @@ function createWindow() {
       label: 'Crop to Current View (Ctrl+X)',
       accelerator: 'CmdOrCtrl+X',
       click: () => {
-        // Trigger the same action as Ctrl+X keyboard shortcut
-        newWindow.webContents.executeJavaScript(`
-          document.dispatchEvent(new KeyboardEvent('keydown', {
-            key: 'x',
-            ctrlKey: true,
-            bubbles: true
-          }));
-        `);
+        // Send crop-to-view event to renderer
+        newWindow.webContents.send('crop-to-view');
       }
     },
     {
@@ -356,13 +350,6 @@ function createWindow() {
           }
         }
       ]
-    },
-    { type: 'separator' },
-    {
-      label: 'Invert Colors (Ctrl+I)',
-      click: () => {
-        newWindow.webContents.send('invert-colors');
-      }
     },
     { type: 'separator' },
     {
