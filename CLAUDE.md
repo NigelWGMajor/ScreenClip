@@ -193,3 +193,43 @@ npm run dist            # Build without publishing
 ## Key Architectural Principles
 
 - **IMPORTANT**: In this application, all properties related to positions, scale, size and the like are persisted, and these values are only adjusted when an operation requires them to change. The state in the application is always the source of truth, the direction of data flow is always TO the physical display. No changes to the code should disturb or duplicate this state unnecessarily.
+
+## Lessons Learned: OCR Integration & Crop Function Implementation
+
+### OCR Integration with Tesseract.js
+**Challenge**: Initial attempt to run OCR in renderer process failed with worker path errors.
+
+**Solution**: Moved OCR processing to main process using absolute paths:
+- Main process has access to proper file system paths
+- Worker initialization: `await createWorker('eng', 1, { workerPath: path.join(__dirname, 'node_modules/tesseract.js/src/worker-script/node/index.js') })`
+- Renderer sends image data via IPC, main process handles OCR, returns text
+
+**Key Insight**: Tesseract.js workers need absolute file system paths - main process is the right place for this.
+
+### Crop Function Overhaul
+**Original Problem**: Crop function tried to resize window and used wrong coordinate system.
+
+**Root Issues**:
+1. **Multiple crop functions**: Old Ctrl+X function called different handler than menu
+2. **Window resizing**: Crop tried to change window size (against user requirements)
+3. **Wrong coordinate system**: Used original screenshot bounds instead of current visible area
+
+**Solution Implemented**:
+1. **Unified crop triggers**: Both menu and Ctrl+X now call same `crop-to-view` function
+2. **No window resizing**: Crop only changes background image, never window dimensions
+3. **Correct visible area calculation**: 
+   - Get current window size and background properties
+   - Calculate what part of image is actually visible in frame
+   - Crop exactly that area from source image
+   - Position cropped result at 0,0 since it now represents the visible content
+
+**Critical Menu Consistency Rule**: Keyboard shortcuts must ALWAYS call the same function as their corresponding menu items. Never duplicate functionality - one source of truth.
+
+**Anti-Pattern Avoided**: Don't assume what coordinates to crop from - always calculate based on current visible content.
+
+### Menu Organization
+**Issue**: "Invert Colors" appeared both in "Image Effects" submenu AND as standalone menu item.
+
+**Fix**: Removed duplicate standalone item - image processing options belong in their dedicated submenu only.
+
+**Principle**: Each menu item should appear exactly once in its most logical location.
