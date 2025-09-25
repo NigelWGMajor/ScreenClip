@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Screen Selection</title>
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    body {
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      cursor: crosshair;
+      user-select: none;
+      background: transparent;
+      outline: none; /* Remove focus outline */
+    }
+    
+    #screenshot {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+    
+    #overlay {
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: rgba(0, 50, 100, 0.15);
+      pointer-events: none;
+    }
+    
+    #selection {
+      position: absolute;
+      border: 2px solid #0080ff;
+      background: rgba(0, 128, 255, 0.15);
+      pointer-events: none;
+      display: none;
+      z-index: 1000;
+    }
+    
+    #instructions {
+      position: absolute;
+      top: 20px;
+      left: 50%;
+      transform: translateX(-50%);
+      color: white;
+      background: rgba(0, 0, 0, 0.7);
+      padding: 10px 20px;
+      border-radius: 5px;
+      font-family: Arial, sans-serif;
+      font-size: 14px;
+      z-index: 1000;
+    }
+  </style>
+</head>
+<body tabindex="-1">
+  <div id="instructions">Drag to select area → Redrag to adjust → Enter to confirm → ESC to cancel → Right-click for menu</div>
+  <img id="screenshot" />
+  <div id="overlay"></div>
+  <div id="selection"></div>
+  
+  <!-- Backup confirmation button (shown when selection exists) -->
+  <button id="confirmButton" style="display: none; position: absolute; z-index: 2000; padding: 10px 20px; background: #0080ff; color: white; border: none; border-radius: 5px; font-size: 16px; cursor: pointer;">Confirm Selection (Enter)</button>
+  
+  <script src="selection.js"></script>
+</body>
+</html>

@@ -1,4 +1,4 @@
-const { app, BrowserWindow, Menu, ipcMain, screen, nativeImage, desktopCapturer, clipboard, dialog, Tray } = require('electron');
+const { app, BrowserWindow, Menu, ipcMain, screen, nativeImage, desktopCapturer, clipboard, dialog, Tray, globalShortcut } = require('electron');
 const path = require('path');
 const fs = require('fs');
 
@@ -1462,17 +1462,27 @@ ipcMain.handle('reset-content-scale', async (event) => {
 // IPC handler for minimizing to system tray (Ctrl+H)
 ipcMain.handle('minimize-to-tray', async (event) => {
   try {
-    const allWindows = BrowserWindow.getAllWindows();
+    const allWindows = BrowserWindow.getAllWindows().filter(win => !win.selectionWindow);
     
-    // Hide all windows
-    allWindows.forEach(window => {
-      if (!window.isDestroyed()) {
-        window.hide();
+    if (allWindows.length > 0) {
+      // Create tray if it doesn't exist
+      if (!tray) {
+        createTray();
       }
-    });
-    
-    console.log(`Minimized ${allWindows.length} windows to system tray`);
-    return { success: true, windowCount: allWindows.length };
+      
+      // Hide all windows
+      allWindows.forEach(window => {
+        if (!window.isDestroyed()) {
+          window.hide();
+        }
+      });
+      
+      console.log(`Minimized ${allWindows.length} windows to system tray`);
+      return { success: true, windowCount: allWindows.length };
+    } else {
+      console.log('No windows to minimize');
+      return { success: false, error: 'No windows to minimize' };
+    }
   } catch (error) {
     console.error('Failed to minimize to tray:', error);
     return { success: false, error: error.message };
@@ -1490,12 +1500,21 @@ function createTray() {
     {
       label: 'Restore All Windows',
       click: () => {
-        const allWindows = BrowserWindow.getAllWindows();
-        allWindows.forEach(window => {
-          if (!window.isDestroyed()) {
-            window.show();
+        const normalWindows = BrowserWindow.getAllWindows().filter(win => !win.selectionWindow);
+        if (normalWindows.length > 0) {
+          normalWindows.forEach(window => {
+            if (!window.isDestroyed()) {
+              window.show();
+            }
+          });
+          
+          // Destroy tray since windows are now visible
+          if (tray) {
+            tray.destroy();
+            tray = null;
+            console.log('Tray destroyed - windows restored');
           }
-        });
+        }
       }
     },
     {
@@ -1519,25 +1538,519 @@ function createTray() {
   
   // Double-click to restore all windows
   tray.on('double-click', () => {
-    const allWindows = BrowserWindow.getAllWindows();
-    allWindows.forEach(window => {
-      if (!window.isDestroyed()) {
-        window.show();
+    const normalWindows = BrowserWindow.getAllWindows().filter(win => !win.selectionWindow);
+    if (normalWindows.length > 0) {
+      normalWindows.forEach(window => {
+        if (!window.isDestroyed()) {
+          window.show();
+        }
+      });
+      
+      // Destroy tray since windows are now visible
+      if (tray) {
+        tray.destroy();
+        tray = null;
+        console.log('Tray destroyed - windows restored via double-click');
       }
-    });
+    }
   });
 }
 
+// Register global shortcuts
+function registerGlobalShortcuts() {
+  // Register Win+Esc for global screen capture with selection
+  const shortcutRegistered = globalShortcut.register('Super+Escape', () => {
+    console.log('Global shortcut Win+Esc triggered');
+    captureScreenWithSelection();
+  });
+  
+  if (!shortcutRegistered) {
+    console.error('Failed to register global shortcut Win+Esc');
+  } else {
+    console.log('Global shortcut Win+Esc registered successfully');
+  }
+}
+
+// Track last shortcut time to prevent rapid-fire
+let lastShortcutTime = 0;
+
+// Register temporary global shortcuts for selection interface
+function registerSelectionShortcuts(selectionWindow) {
+  // Unregister any existing selection shortcuts first
+  unregisterSelectionShortcuts();
+  
+  // Register Enter for confirmation
+  const enterRegistered = globalShortcut.register('Return', () => {
+    const now = Date.now();
+    if (now - lastShortcutTime < 500) { // Increase debounce to 500ms
+      console.log('Global Enter - debounced (too quick)');
+      return;
+    }
+    lastShortcutTime = now;
+    
+    console.log('Global Enter pressed - confirming selection');
+    if (selectionWindow && !selectionWindow.isDestroyed()) {
+      // Get selection data first, then close window immediately
+      selectionWindow.webContents.executeJavaScript(`
+        if (selectionBounds && !isConfirming) {
+          // Return selection data to main process
+          ({ 
+            selectionData: {
+              left: selectionBounds.left,
+              top: selectionBounds.top,
+              width: selectionBounds.width,
+              height: selectionBounds.height,
+              screenshot: currentScreenshot,
+              displayBounds: displayInfo.displayBounds,
+              scaleFactor: displayInfo.scaleFactor
+            }
+          })
+        } else {
+          ({ selectionData: null })
+        }
+      `).then((result) => {
+        if (result && result.selectionData) {
+          console.log('Got selection data, closing window and creating new window');
+          // Close selection window immediately
+          if (!selectionWindow.isDestroyed()) {
+            selectionWindow.close();
+          }
+          // Process selection directly in main process
+          processSelectionData(result.selectionData);
+        } else {
+          console.log('No selection data available');
+        }
+      }).catch((error) => {
+        console.error('Error getting selection data:', error);
+      });
+    }
+  });
+  
+  // Register Escape for cancel  
+  const escapeRegistered = globalShortcut.register('Escape', () => {
+    console.log('Global Escape pressed - canceling selection');
+    if (selectionWindow && !selectionWindow.isDestroyed()) {
+      console.log('Closing selection window via global shortcut');
+      selectionWindow.close();
+    }
+    // Unregister selection shortcuts when canceled
+    unregisterSelectionShortcuts();
+  });
+  
+  if (enterRegistered) {
+    console.log('Selection Enter shortcut registered');
+  } else {
+    console.log('Failed to register selection Enter shortcut');
+  }
+  
+  if (escapeRegistered) {
+    console.log('Selection Escape shortcut registered');
+  } else {
+    console.log('Failed to register selection Escape shortcut');
+  }
+}
+
+// Unregister selection-specific shortcuts
+function unregisterSelectionShortcuts() {
+  try {
+    globalShortcut.unregister('Return');
+    globalShortcut.unregister('Escape');
+    console.log('Selection shortcuts unregistered');
+  } catch (error) {
+    // Ignore errors if shortcuts weren't registered
+  }
+}
+
+// Capture screen where mouse cursor is located and show selection interface
+async function captureScreenWithSelection() {
+  try {
+    // Get cursor position to determine which screen to capture
+    const cursorPosition = screen.getCursorScreenPoint();
+    const currentDisplay = screen.getDisplayNearestPoint(cursorPosition);
+    
+    console.log(`Cursor at (${cursorPosition.x}, ${cursorPosition.y}), capturing display:`, currentDisplay.bounds);
+    
+    // Create or find a window for the selection interface
+    let selectionWindow = createSelectionWindow(currentDisplay);
+    
+    // Register temporary global shortcuts for selection window
+    registerSelectionShortcuts(selectionWindow);
+    
+    // Capture the current screen
+    const sources = await desktopCapturer.getSources({
+      types: ['screen'],
+      thumbnailSize: {
+        width: currentDisplay.bounds.width * currentDisplay.scaleFactor,
+        height: currentDisplay.bounds.height * currentDisplay.scaleFactor
+      }
+    });
+    
+    // Find the source that matches our display
+    const screenSource = sources.find(source => {
+      return source.display_id === currentDisplay.id.toString();
+    });
+    
+    if (screenSource) {
+      const screenshot = screenSource.thumbnail.toDataURL();
+      
+      // Send the screenshot to the selection window
+      selectionWindow.webContents.send('show-screenshot-for-selection', {
+        screenshot,
+        displayBounds: currentDisplay.bounds,
+        scaleFactor: currentDisplay.scaleFactor
+      });
+      
+      // Ensure proper focus and always-on-top after screenshot is sent
+      setTimeout(() => {
+        if (!selectionWindow.isDestroyed()) {
+          selectionWindow.focus();
+          selectionWindow.setAlwaysOnTop(true, 'screen-saver');
+          selectionWindow.moveTop();
+          console.log('Selection window re-focused after screenshot load');
+        }
+      }, 100);
+      
+      // Additional always-on-top enforcement
+      setTimeout(() => {
+        if (!selectionWindow.isDestroyed()) {
+          selectionWindow.setAlwaysOnTop(true, 'screen-saver');
+          selectionWindow.moveTop();
+          console.log('Selection window always-on-top enforced');
+        }
+      }, 300);
+      
+      console.log(`Screenshot captured for selection interface`);
+    } else {
+      console.error('Could not find screen source for current display');
+    }
+    
+  } catch (error) {
+    console.error('Error capturing screen with selection:', error);
+  }
+}
+
+// Create a fullscreen selection window
+function createSelectionWindow(display) {
+  // Check if we already have a selection window
+  let existingWindow = BrowserWindow.getAllWindows().find(win => win.selectionWindow === true);
+  
+  if (existingWindow && !existingWindow.isDestroyed()) {
+    existingWindow.show();
+    existingWindow.focus();
+    existingWindow.setAlwaysOnTop(true, 'screen-saver');
+    existingWindow.moveTop();
+    console.log('Reusing existing selection window with always-on-top enforced');
+    return existingWindow;
+  }
+  
+  // Create new selection window
+  const selectionWindow = new BrowserWindow({
+    x: display.bounds.x,
+    y: display.bounds.y,
+    width: display.bounds.width,
+    height: display.bounds.height,
+    fullscreen: true,
+    frame: false,
+    transparent: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    closable: true,
+    minimizable: false,
+    maximizable: false,
+    resizable: false,
+    webPreferences: {
+      nodeIntegration: true,
+      contextIsolation: false,
+      enableRemoteModule: true
+    }
+  });
+  
+  // Mark this as a selection window
+  selectionWindow.selectionWindow = true;
+  
+  // Load the selection interface (we'll need to create this)
+  selectionWindow.loadFile('selection.html');
+  
+  // Ensure the window can receive keyboard events
+  selectionWindow.once('ready-to-show', () => {
+    selectionWindow.show();
+    selectionWindow.focus();
+    selectionWindow.setAlwaysOnTop(true, 'screen-saver');
+    selectionWindow.moveTop();
+    console.log('Selection window focused for keyboard input');
+  });
+  
+  // Clean up shortcuts when window closes
+  selectionWindow.on('closed', () => {
+    console.log('Selection window closed - cleaning up shortcuts');
+    unregisterSelectionShortcuts();
+  });
+  
+  return selectionWindow;
+}
+
+// Track ongoing selection processing to prevent duplicates
+let isProcessingSelection = false;
+
+// Process selection data directly (called from global shortcuts)
+async function processSelectionData(selectionData) {
+  if (isProcessingSelection) {
+    console.log('Selection processing already in progress - ignoring duplicate request');
+    return;
+  }
+  
+  try {
+    isProcessingSelection = true;
+    console.log('Processing selection data directly:', {
+      area: `${selectionData.width}x${selectionData.height} at (${selectionData.left}, ${selectionData.top})`
+    });
+    
+    // Create a new ScreenClip window with the selected area
+    const newWindow = createWindow();
+    
+    // Wait for the window to be ready
+    await new Promise(resolve => {
+      newWindow.once('ready-to-show', resolve);
+    });
+    
+    // Additional wait to ensure renderer is fully loaded
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
+    // Calculate the crop area in the original screenshot coordinates
+    const scaleFactor = selectionData.scaleFactor;
+    const cropX = Math.floor(selectionData.left * scaleFactor);
+    const cropY = Math.floor(selectionData.top * scaleFactor);
+    const cropWidth = Math.floor(selectionData.width * scaleFactor);
+    const cropHeight = Math.floor(selectionData.height * scaleFactor);
+    
+    console.log(`Crop calculations: ${cropWidth}x${cropHeight} at (${cropX}, ${cropY}), scaleFactor: ${scaleFactor}`);
+    
+    // Position and size the window to match the selected area (plus border)
+    const borderWidth = 4; // 2px border on each side
+    
+    // Account for potential system window offset (invisible title bar, etc.)
+    const systemOffsetY = -8; // Adjust for Windows invisible title bar
+    
+    const newBounds = {
+      x: Math.round(selectionData.displayBounds.x + selectionData.left),
+      y: Math.round(selectionData.displayBounds.y + selectionData.top + systemOffsetY),
+      width: Math.round(selectionData.width + borderWidth),
+      height: Math.round(selectionData.height + borderWidth)
+    };
+    
+    newWindow.setBounds(newBounds);
+    
+    // Ensure always-on-top behavior is maintained  
+    newWindow.setAlwaysOnTop(true, 'normal');
+    newWindow.focus();
+    
+    console.log(`New window positioned at (${newBounds.x}, ${newBounds.y}) and sized to: ${newBounds.width}x${newBounds.height}`);
+    
+    // Send the selection data to the new window to crop and display
+    newWindow.webContents.send('load-selected-area', {
+      screenshot: selectionData.screenshot,
+      cropArea: {
+        x: cropX,
+        y: cropY,
+        width: cropWidth,
+        height: cropHeight
+      },
+      windowSize: {
+        width: selectionData.width,
+        height: selectionData.height
+      },
+      selectionCoords: {
+        left: selectionData.left,
+        top: selectionData.top
+      },
+      scaleFactor: scaleFactor
+    });
+    
+    console.log('Selection data sent to new window');
+    console.log(`Created new window with selected area: ${selectionData.width}x${selectionData.height}`);
+    
+    // Unregister selection shortcuts since selection is confirmed
+    unregisterSelectionShortcuts();
+    
+  } catch (error) {
+    console.error('Error processing selection data:', error);
+  } finally {
+    // Reset processing flag
+    isProcessingSelection = false;
+  }
+}
+
+// IPC handler for processing screen selection
+ipcMain.handle('process-screen-selection', async (event, selectionData) => {
+  if (isProcessingSelection) {
+    console.log('Selection processing already in progress - ignoring duplicate request');
+    return { success: false, error: 'Processing already in progress' };
+  }
+  
+  try {
+    isProcessingSelection = true;
+    console.log('Processing screen selection:', {
+      area: `${selectionData.width}x${selectionData.height} at (${selectionData.left}, ${selectionData.top})`
+    });
+    
+    // Create a new ScreenClip window with the selected area
+    const newWindow = createWindow();
+    
+    // Wait for the window to be ready
+    await new Promise(resolve => {
+      newWindow.once('ready-to-show', resolve);
+    });
+    
+    // Additional wait to ensure renderer is fully loaded
+    await new Promise(resolve => setTimeout(resolve, 100));
+    
+    // Calculate the crop area in the original screenshot coordinates
+    const scaleFactor = selectionData.scaleFactor;
+    const cropX = Math.floor(selectionData.left * scaleFactor);
+    const cropY = Math.floor(selectionData.top * scaleFactor);
+    const cropWidth = Math.floor(selectionData.width * scaleFactor);
+    const cropHeight = Math.floor(selectionData.height * scaleFactor);
+    
+    console.log(`Crop calculations: ${cropWidth}x${cropHeight} at (${cropX}, ${cropY}), scaleFactor: ${scaleFactor}`);
+    
+    // Position and size the window to match the selected area (plus border)
+    const borderWidth = 4; // 2px border on each side
+    
+    // Account for potential system window offset (invisible title bar, etc.)
+    const systemOffsetY = -8; // Adjust for Windows invisible title bar
+    
+    const newBounds = {
+      x: Math.round(selectionData.displayBounds.x + selectionData.left),
+      y: Math.round(selectionData.displayBounds.y + selectionData.top + systemOffsetY),
+      width: Math.round(selectionData.width + borderWidth),
+      height: Math.round(selectionData.height + borderWidth)
+    };
+    
+    newWindow.setBounds(newBounds);
+    
+    // Ensure always-on-top behavior is maintained  
+    newWindow.setAlwaysOnTop(true, 'normal');
+    newWindow.focus();
+    
+    console.log(`New window positioned at (${newBounds.x}, ${newBounds.y}) and sized to: ${newBounds.width}x${newBounds.height}`);
+    
+    // Send the selection data to the new window to crop and display
+    newWindow.webContents.send('load-selected-area', {
+      screenshot: selectionData.screenshot,
+      cropArea: {
+        x: cropX,
+        y: cropY,
+        width: cropWidth,
+        height: cropHeight
+      },
+      windowSize: {
+        width: selectionData.width,
+        height: selectionData.height
+      },
+      selectionCoords: {
+        left: selectionData.left,
+        top: selectionData.top
+      },
+      scaleFactor: scaleFactor
+    });
+    
+    console.log('Selection data sent to new window');
+    
+    console.log(`Created new window with selected area: ${selectionData.width}x${selectionData.height}`);
+    
+    // Unregister selection shortcuts since selection is confirmed
+    unregisterSelectionShortcuts();
+    
+    return { success: true };
+  } catch (error) {
+    console.error('Error processing screen selection:', error);
+    return { success: false, error: error.message };
+  } finally {
+    // Reset processing flag
+    isProcessingSelection = false;
+  }
+});
+
+// IPC handler for selection interface context menu
+ipcMain.handle('show-selection-context-menu', async (event, data) => {
+  const senderWindow = BrowserWindow.fromWebContents(event.sender);
+  
+  const contextMenu = Menu.buildFromTemplate([
+    {
+      label: 'Confirm Selection (Enter)',
+      enabled: data.hasSelection,
+      click: () => {
+        // Call confirmation function directly instead of synthetic keyboard events
+        senderWindow.webContents.executeJavaScript(`
+          if (typeof confirmSelection === 'function' && selectionBounds) {
+            console.log('Context menu confirming selection');
+            confirmSelection();
+          } else {
+            console.log('Context menu: No selection to confirm');
+          }
+        `);
+      }
+    },
+    { type: 'separator' },
+    {
+      label: 'Cancel (ESC)',
+      click: () => {
+        // Close window directly instead of synthetic keyboard events
+        console.log('Context menu cancel - closing selection window');
+        if (!senderWindow.isDestroyed()) {
+          senderWindow.close();
+        }
+      }
+    },
+    { type: 'separator' },
+    {
+      label: 'Quit ScreenClip',
+      click: () => {
+        isQuitting = true;
+        app.quit();
+      }
+    }
+  ]);
+  
+  contextMenu.popup({
+    window: senderWindow,
+    x: data.x,
+    y: data.y
+  });
+  
+  return { success: true };
+});
+
 app.on('ready', () => {
-  createWindow();
-  createTray();
+  const mainWindow = createWindow();
+  registerGlobalShortcuts();
+  
+  // Auto-minimize to tray on launch
+  mainWindow.once('ready-to-show', () => {
+    // Create tray immediately
+    createTray();
+    
+    // Hide the window instead of showing it
+    mainWindow.hide();
+    console.log('Application launched and minimized to system tray');
+  });
 });
 
 app.on('window-all-closed', () => {
-  // Don't quit when all windows are closed if we have a tray
-  // This allows the app to continue running in the tray
-  if (process.platform !== 'darwin' && isQuitting) {
-    app.quit();
+  // Check if we have any non-selection windows
+  const normalWindows = BrowserWindow.getAllWindows().filter(win => !win.selectionWindow);
+  
+  if (normalWindows.length === 0) {
+    // No more normal windows, destroy tray and quit
+    if (tray) {
+      tray.destroy();
+      tray = null;
+      console.log('Tray destroyed - no windows remaining');
+    }
+    
+    if (process.platform !== 'darwin') {
+      app.quit();
+    }
   }
 });
 
@@ -1545,4 +2058,10 @@ app.on('activate', () => {
   if (BrowserWindow.getAllWindows().length === 0) {
     createWindow();
   }
+});
+
+app.on('will-quit', () => {
+  // Cleanup global shortcuts
+  globalShortcut.unregisterAll();
+  isQuitting = true;
 });

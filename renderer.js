@@ -2253,3 +2253,69 @@ async function undoLastOperation() {
     console.error('Error during undo operation:', error);
   }
 }
+
+// Handle loading selected area from global screen capture
+ipcRenderer.on('load-selected-area', async (event, selectionData) => {
+  console.log('Loading selected area:', selectionData);
+  
+  try {
+    const content = document.querySelector('.content');
+    
+    // Create canvas to crop the selected area from the full screenshot
+    const canvas = document.createElement('canvas');
+    const ctx = canvas.getContext('2d');
+    
+    // Load the full screenshot image
+    const img = new Image();
+    img.onload = async () => {
+      console.log(`Full screenshot loaded: ${img.width}x${img.height}`);
+      
+      // Calculate scale factor and logical dimensions
+      const scaleFactor = selectionData.scaleFactor;
+      const logicalScreenWidth = Math.round(img.width / scaleFactor);
+      const logicalScreenHeight = Math.round(img.height / scaleFactor);
+      
+      // Calculate background position to show the selected area in the window
+      // The window is positioned at the selection coordinates on screen
+      // We need to offset the background so the selected area appears in the window
+      const backgroundOffsetX = -selectionData.selectionCoords.left;
+      const backgroundOffsetY = -selectionData.selectionCoords.top;
+      
+      console.log(`Background: ${logicalScreenWidth}x${logicalScreenHeight} at offset (${backgroundOffsetX}, ${backgroundOffsetY})`);
+      
+      // Set the background image to the full screenshot (not cropped)
+      content.style.backgroundImage = `url(${selectionData.screenshot})`;
+      content.style.backgroundSize = `${logicalScreenWidth}px ${logicalScreenHeight}px`;
+      content.style.backgroundPosition = `${backgroundOffsetX}px ${backgroundOffsetY}px`;
+      content.style.backgroundRepeat = 'no-repeat';
+      
+      // Update tracking variables for the full screenshot
+      originalImageWidth = logicalScreenWidth;
+      originalImageHeight = logicalScreenHeight;
+      originalPositionX = backgroundOffsetX;
+      originalPositionY = backgroundOffsetY;
+      imageOffset = { x: backgroundOffsetX, y: backgroundOffsetY };
+      currentImageScale = 1.0;
+      
+      // Set original window bounds for proper integration
+      const currentBounds = await ipcRenderer.invoke('get-window-bounds');
+      originalWindowBounds = {
+        x: currentBounds.x,
+        y: currentBounds.y,
+        width: currentBounds.width,
+        height: currentBounds.height
+      };
+      
+      console.log(`Full screenshot loaded in window - shows selected area but can be repositioned/scaled`);
+    };
+    
+    img.onerror = (error) => {
+      console.error('Failed to load screenshot for selected area:', error);
+    };
+    
+    img.src = selectionData.screenshot;
+    
+  } catch (error) {
+    console.error('Error loading selected area:', error);
+  }
+});

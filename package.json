@@ -25,6 +25,8 @@
       "preload.js",
       "index.html",
       "styles.css",
+      "selection.html",
+      "selection.js",
       "package.json"
     ],
     "win": {
