@@ -1562,6 +1562,23 @@ document.addEventListener('keydown', async (event) => {
       }
     }
   }
+  
+  // Handle F1 (show help)
+  else if (event.key === 'F1') {
+    event.preventDefault();
+    console.log('F1 detected, showing help...');
+    try {
+      // Trigger the same help function as the menu
+      const result = await ipcRenderer.invoke('show-help-dialog');
+      if (result) {
+        console.log('Help dialog displayed successfully');
+      } else {
+        console.error('Failed to show help dialog:', result.error);
+      }
+    } catch (error) {
+      console.error('Error showing help dialog:', error);
+    }
+  }
 });
 
 // Drag and drop support for image files

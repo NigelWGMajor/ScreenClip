@@ -1533,7 +1533,7 @@ function createTray() {
     }
   ]);
   
-  tray.setToolTip('ScreenClip');
+  tray.setToolTip('ScreenClip - Press Win+Escape to capture screen');
   tray.setContextMenu(contextMenu);
   
   // Double-click to restore all windows
