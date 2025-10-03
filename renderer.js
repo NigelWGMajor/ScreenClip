@@ -3249,7 +3249,7 @@ function applyBlurEffect(ctx, canvas, x, y, width, height) {
     const data = imageData.data;
     
     // Create a simple box blur effect
-    const blurRadius = 8; // Adjust this for stronger/weaker blur
+    const blurRadius = 4; // Reduced from 8 for more subtle blur - good for redaction
     const tempData = new Uint8ClampedArray(data);
     
     // Apply horizontal blur pass
