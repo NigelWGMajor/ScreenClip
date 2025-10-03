@@ -49,6 +49,9 @@ let drawingColor = drawingColors[colorIndex];
 let drawingLineWidth = 2; // Reduced thickness for cleaner look
 let textMode = false;
 let pendingText = null; // For text positioning before entry
+// Text size system (like CSS headings H1-H5)
+let textSizeIndex = 2; // Default to size 3 (medium)
+const textSizes = [32, 24, 18, 14, 10]; // H1=32px, H2=24px, H3=18px, H4=14px, H5=10px
 let preventNextContextMenu = false; // Flag to prevent context menu after drawing
 let rightClickStartPos = null; // Track right-click start position for drag detection
 const MIN_DRAG_DISTANCE = 5; // Minimum pixels to consider it a drag vs click
@@ -1962,7 +1965,18 @@ document.addEventListener('keydown', async (event) => {
     if (backgroundImage && backgroundImage !== 'none') {
       const key = event.key.toLowerCase();
       
-      if (key === 't') {
+      // Handle text size selection (1-5 keys like CSS headings H1-H5)
+      if (['1', '2', '3', '4', '5'].includes(event.key)) {
+        event.preventDefault();
+        event.stopPropagation();
+        textSizeIndex = parseInt(event.key) - 1; // Convert 1-5 to 0-4 array index
+        const sizeLabel = `H${event.key}`;
+        const pixelSize = textSizes[textSizeIndex];
+        updateBorderColor();
+        console.log(`*** TEXT SIZE CHANGED *** to ${sizeLabel} (${pixelSize}px) via ${event.key} key`);
+        debugLog(`*** TEXT SIZE SET *** to ${sizeLabel}: ${pixelSize}px`);
+      }
+      else if (key === 't') {
         // Text mode
         event.preventDefault();
         event.stopPropagation();
@@ -1970,7 +1984,10 @@ document.addEventListener('keydown', async (event) => {
         setDrawingMode('text', 'T key pressed');
         document.body.style.cursor = 'text';
         updateBorderColor();
-        debugLog('*** TEXT MODE ACTIVATED *** via T key - Click to place text');
+        const currentSizeLabel = `H${textSizeIndex + 1}`;
+        const currentPixelSize = textSizes[textSizeIndex];
+        debugLog(`*** TEXT MODE ACTIVATED *** via T key - Current size: ${currentSizeLabel} (${currentPixelSize}px) - Click to place text`);
+        console.log(`*** TEXT MODE SET *** with size ${currentSizeLabel}: ${currentPixelSize}px - Use keys 1-5 to change size`);
       } else if (key === 's') {
         // Sharp Box mode (changed from B to S key)
         event.preventDefault();
@@ -3532,15 +3549,24 @@ function enterTextInput() {
     textInput.type = 'text';
     textInput.style.position = 'absolute';
     textInput.style.left = pendingText.x + 'px';
-    textInput.style.top = (pendingText.y - 20) + 'px'; // Position above the cursor
-    textInput.style.fontSize = '16px'; // Fixed size, not DPI scaled
+    // Position input box so text appears exactly where it will be drawn
+    // Canvas fillText draws from baseline, so we need to adjust for that
+    const fontSize = textSizes[textSizeIndex];
+    textInput.style.top = (pendingText.y - fontSize) + 'px'; // Align baseline with click position
+    textInput.style.fontSize = fontSize + 'px'; // Use selected text size to match final output
+    textInput.style.fontWeight = 'bold'; // Match the canvas text style
+    textInput.style.fontFamily = 'Arial'; // Match the canvas font family
     textInput.style.color = drawingColor;
-    textInput.style.backgroundColor = 'rgba(255, 255, 255, 0.8)';
+    textInput.style.backgroundColor = 'rgba(255, 255, 255, 0.1)'; // Much more transparent
     textInput.style.border = '1px solid ' + drawingColor;
-    textInput.style.borderRadius = '3px';
-    textInput.style.padding = '2px 5px';
+    textInput.style.opacity = '0.7'; // Make the entire input semi-transparent
+    textInput.style.borderRadius = '2px';
+    // Minimal padding for precise alignment
+    textInput.style.padding = '1px 3px'; // Very minimal padding to maintain position accuracy
     textInput.style.zIndex = '1000';
-    textInput.style.minWidth = '100px';
+    // Scale minimum width with text size
+    const minWidth = Math.max(80, fontSize * 2.5); // Smaller minimum width for better precision
+    textInput.style.minWidth = minWidth + 'px';
     
     document.body.appendChild(textInput);
     textInput.focus();
@@ -3590,18 +3616,18 @@ function enterTextInput() {
 
 // Helper function to draw text on canvas
 function drawTextOnCanvas(x, y, text) {
-  console.log(`*** DRAWING TEXT *** "${text}" at (${x}, ${y})`);
+  console.log(`*** DRAWING TEXT *** "${text}" at (${x}, ${y}) with size index ${textSizeIndex}`);
   
   if (drawingCtx) {
-    // Use a base font size that doesn't get scaled by DPI
-    const baseFontSize = 18;
-    drawingCtx.font = `bold ${baseFontSize}px Arial`;
+    // Use the selected text size from the textSizes array
+    const fontSize = textSizes[textSizeIndex];
+    drawingCtx.font = `bold ${fontSize}px Arial`;
     
     // Simple text drawing - no background, no outline, no shadows
     drawingCtx.fillStyle = drawingColor;
     drawingCtx.fillText(text, x, y);
     
-    console.log(`*** TEXT DRAWING COMPLETED *** in color ${drawingColor}`);
+    console.log(`*** TEXT DRAWING COMPLETED *** in color ${drawingColor} at size ${fontSize}px (H${textSizeIndex + 1})`);
   } else {
     console.error('*** TEXT DRAWING FAILED *** - no drawing context');
   }
