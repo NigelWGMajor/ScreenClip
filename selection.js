@@ -38,10 +38,14 @@ document.addEventListener('mousedown', (event) => {
     
     console.log(`Mouse down at (${event.clientX}, ${event.clientY})`);
     console.log('Current selectionBounds:', selectionBounds);
+    console.log('Selection classList:', selection.classList.toString());
+    console.log('Selection display:', selection.style.display);
+    console.log('Selection pointer-events:', getComputedStyle(selection).pointerEvents);
     
     // If we have an existing selection and click is inside it, confirm the selection
     if (selectionBounds && isPointInSelection(event.clientX, event.clientY, selectionBounds)) {
       console.log(`Click INSIDE selection at (${event.clientX}, ${event.clientY}) - confirming selection`);
+      console.log('Calling confirmSelection...');
       event.stopPropagation(); // Prevent any other handlers
       confirmSelection();
       return; // Don't start new selection

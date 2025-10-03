@@ -40,7 +40,7 @@ let autoCropTimer = null;
 let drawingCanvas = null;
 let drawingCtx = null;
 let isDrawing = false;
-let drawingMode = 'arrow'; // Default to arrow mode: 'arrow', 'box', 'rounded-box', 'text'
+let drawingMode = 'arrow'; // Default to arrow mode: 'arrow', 'box', 'rounded-box', 'text', 'fill'
 let drawingStart = null;
 let drawingCurrent = null;
 let drawingColors = ['red', 'orange', 'yellow', 'green', 'blue', 'grey', 'white', 'black'];
@@ -288,6 +288,9 @@ ipcRenderer.on('menu-load-file', async () => {
       const body = document.querySelector('body');
       content.style.backgroundImage = `url(${result.dataUrl})`;
       content.style.backgroundRepeat = 'no-repeat';
+      
+      // Initialize sampling canvas for pixel color sampling
+      initializeSamplingCanvas(result.dataUrl);
       
       // Automatically turn off border and set content opacity to 100% when loading
       body.style.borderColor = 'transparent';
@@ -1214,26 +1217,26 @@ document.addEventListener('mousemove', async (event) => {
       Math.pow(event.clientY - rightClickStartPos.y, 2)
     );
     
-    // Only start drawing if we've moved enough distance
-    if (dragDistance >= MIN_DRAG_DISTANCE) {
-      console.log(`Starting drawing - drag distance: ${dragDistance}`);
-      
-      if (drawingMode === 'arrow') {
-        startArrowDrawing({ clientX: rightClickStartPos.x, clientY: rightClickStartPos.y });
-      } else if (drawingMode === 'box' || drawingMode === 'rounded-box') {
-        startBoxDrawing({ clientX: rightClickStartPos.x, clientY: rightClickStartPos.y });
-      } else if (drawingMode === 'text') {
-        // For text mode, right-click places text at start position
-        const content = document.querySelector('.content');
-        const rect = content.getBoundingClientRect();
-        pendingText = {
-          x: rightClickStartPos.x - rect.left,
-          y: rightClickStartPos.y - rect.top
-        };
-        console.log(`Text position set at (${pendingText.x}, ${pendingText.y}) - Press Enter to type`);
-      }
-      
-      rightClickStartPos = null; // Clear the start position
+      // Only start drawing if we've moved enough distance
+      if (dragDistance >= MIN_DRAG_DISTANCE) {
+        console.log(`Starting drawing - drag distance: ${dragDistance}`);
+        
+        if (drawingMode === 'arrow') {
+          startArrowDrawing({ clientX: rightClickStartPos.x, clientY: rightClickStartPos.y });
+        } else if (drawingMode === 'box' || drawingMode === 'rounded-box') {
+          startBoxDrawing({ clientX: rightClickStartPos.x, clientY: rightClickStartPos.y });
+        } else if (drawingMode === 'fill') {
+          startFillDrawing({ clientX: rightClickStartPos.x, clientY: rightClickStartPos.y });
+        } else if (drawingMode === 'text') {
+          // For text mode, right-click places text at start position
+          const content = document.querySelector('.content');
+          const rect = content.getBoundingClientRect();
+          pendingText = {
+            x: rightClickStartPos.x - rect.left,
+            y: rightClickStartPos.y - rect.top
+          };
+          console.log(`Text position set at (${pendingText.x}, ${pendingText.y}) - Press Enter to type`);
+        }      rightClickStartPos = null; // Clear the start position
       rightClickDragStarted = true; // Mark that we started a drag
     }
   }
@@ -1248,6 +1251,11 @@ document.addEventListener('mousemove', async (event) => {
     drawingCurrent = { x: event.clientX, y: event.clientY };
     // Draw preview box during drag
     drawBox(drawingStart.x, drawingStart.y, drawingCurrent.x, drawingCurrent.y, true);
+    return; // Don't process other mouse move logic
+  } else if (isDrawing && drawingMode === 'fill') {
+    drawingCurrent = { x: event.clientX, y: event.clientY };
+    // Draw preview fill rectangle during drag
+    drawFillRect(drawingStart.x, drawingStart.y, drawingCurrent.x, drawingCurrent.y, true);
     return; // Don't process other mouse move logic
   }
   
@@ -1392,6 +1400,31 @@ document.addEventListener('mouseup', (event) => {
     
     console.log(`Box completed from (${drawingStart.x}, ${drawingStart.y}) to (${drawingCurrent.x}, ${drawingCurrent.y}), distance: ${dragDistance}`);
     return;
+  } else if (isDrawing && drawingMode === 'fill') {
+    // Check if we actually dragged enough to warrant preventing context menu
+    const dragDistance = Math.sqrt(
+      Math.pow(drawingCurrent.x - drawingStart.x, 2) + 
+      Math.pow(drawingCurrent.y - drawingStart.y, 2)
+    );
+    
+    if (dragDistance >= MIN_DRAG_DISTANCE) {
+      // Finalize fill rectangle drawing only if we dragged enough
+      debugLog(`*** FINALIZING FILL DRAWING *** from (${drawingStart.x}, ${drawingStart.y}) to (${drawingCurrent.x}, ${drawingCurrent.y})`);
+      drawFillRect(drawingStart.x, drawingStart.y, drawingCurrent.x, drawingCurrent.y, false);
+      rightClickDragStarted = true; // Mark that we just finished drawing
+      debugLog('*** FILL DRAWING COMPLETED *** - context menu temporarily disabled');
+    } else {
+      // Too small to be a real drawing - allow context menu and clear canvas
+      drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+      rightClickDragStarted = false;
+    }
+    
+    // Reset drawing state but keep the mode
+    isDrawing = false;
+    drawingCanvas.style.pointerEvents = 'none'; // Disable canvas interaction
+    
+    console.log(`Fill completed from (${drawingStart.x}, ${drawingStart.y}) to (${drawingCurrent.x}, ${drawingCurrent.y}), distance: ${dragDistance}`);
+    return;
   }
   
   if (isDragging) {
@@ -1519,6 +1552,9 @@ document.addEventListener('keydown', async (event) => {
         const body = document.querySelector('body');
         content.style.backgroundImage = `url(${clipboardData.dataUrl})`;
         content.style.backgroundRepeat = 'no-repeat';
+        
+        // Initialize sampling canvas for pixel color sampling
+        initializeSamplingCanvas(clipboardData.dataUrl);
         
         body.style.borderColor = 'transparent';
         content.style.opacity = '1';
@@ -1926,6 +1962,15 @@ document.addEventListener('keydown', async (event) => {
         document.body.style.cursor = 'crosshair';
         updateBorderColor();
         console.log('*** ARROW MODE ACTIVATED *** via A key');
+      } else if (key === 'f') {
+        // Fill/Erase mode
+        event.preventDefault();
+        event.stopPropagation();
+        setTextMode(false, 'F key pressed');
+        setDrawingMode('fill', 'F key pressed');
+        document.body.style.cursor = 'crosshair';
+        updateBorderColor();
+        debugLog('*** FILL MODE ACTIVATED *** via F key - Right-drag to fill areas');
       }
     }
   }
@@ -2853,6 +2898,19 @@ function startBoxDrawing(event) {
   console.log(`Box drawing started at (${drawingStart.x}, ${drawingStart.y}) in mode: ${drawingMode}`);
 }
 
+// Start fill drawing (right-click)
+function startFillDrawing(event) {
+  isDrawing = true;
+  console.log(`*** STARTING FILL DRAWING *** in mode: ${drawingMode}`);
+  drawingStart = { x: event.clientX, y: event.clientY };
+  drawingCurrent = { x: event.clientX, y: event.clientY };
+  
+  // Enable pointer events on canvas for drawing
+  drawingCanvas.style.pointerEvents = 'auto';
+  
+  console.log(`Fill drawing started at (${drawingStart.x}, ${drawingStart.y})`);
+}
+
 // Draw box from start to end point
 function drawBox(startX, startY, endX, endY, preview = false) {
   if (!drawingCtx) return;
@@ -2928,6 +2986,166 @@ function drawRoundedRectManual(ctx, x, y, width, height, radius) {
   ctx.stroke();
   
   console.log('*** ROUNDED RECT DRAWING COMPLETED ***');
+}
+
+// Draw filled rectangle from start to end point (samples corner color)
+function drawFillRect(startX, startY, endX, endY, preview = false) {
+  if (!drawingCtx) return;
+  
+  // Clear canvas if this is a preview
+  if (preview) {
+    drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+  }
+  
+  // Calculate rectangle dimensions
+  const left = Math.min(startX, endX);
+  const top = Math.min(startY, endY);
+  const width = Math.abs(endX - startX);
+  const height = Math.abs(endY - startY);
+  
+  console.log(`Drawing fill rectangle from (${startX}, ${startY}) to (${endX}, ${endY})`);
+  console.log(`Fill rectangle bounds: left=${left}, top=${top}, width=${width}, height=${height}`);
+  
+  // Sample the background color at the starting drag point (startX, startY)
+  console.log(`*** ABOUT TO SAMPLE BACKGROUND COLOR *** at (${startX}, ${startY})`);
+  const fillColor = sampleBackgroundColor(startX, startY);
+  console.log(`*** SAMPLING COMPLETE *** Got color: ${fillColor}`);
+  
+  if (preview) {
+    // For preview, just draw a stroked rectangle with some transparency
+    drawingCtx.strokeStyle = fillColor;
+    drawingCtx.lineWidth = 2;
+    drawingCtx.setLineDash([5, 5]); // Dashed line for preview
+    drawingCtx.strokeRect(left, top, width, height);
+    drawingCtx.setLineDash([]); // Reset line dash
+    
+    // Add a semi-transparent fill to show what will be filled
+    drawingCtx.fillStyle = fillColor + '80'; // Add transparency
+    drawingCtx.fillRect(left, top, width, height);
+  } else {
+    // For final drawing, fill the rectangle with the sampled color
+    drawingCtx.fillStyle = fillColor;
+    drawingCtx.fillRect(left, top, width, height);
+    console.log(`*** FILL RECTANGLE COMPLETED *** with color: ${fillColor}`);
+  }
+}
+
+// Helper function to initialize the sampling canvas for pixel color sampling
+function initializeSamplingCanvas(dataUrl) {
+  if (!dataUrl) return;
+  
+  console.log('Initializing sampling canvas for pixel color sampling...');
+  
+  // Reset existing canvas
+  window.samplingCanvas = document.createElement('canvas');
+  window.samplingCtx = window.samplingCanvas.getContext('2d');
+  
+  const img = new Image();
+  img.onload = function() {
+    window.samplingCanvas.width = img.width;
+    window.samplingCanvas.height = img.height;
+    window.samplingCtx.drawImage(img, 0, 0);
+    
+    // Store original image dimensions for accurate coordinate transformation
+    window.originalImageWidth = img.width;
+    window.originalImageHeight = img.height;
+    
+    console.log(`Sampling canvas ready: ${img.width}x${img.height}`);
+    console.log(`Stored original image dimensions: ${window.originalImageWidth}x${window.originalImageHeight}`);
+  };
+  img.onerror = function() {
+    console.error('Failed to load image for sampling canvas');
+  };
+  img.src = dataUrl;
+}
+
+// Helper function to sample background color at a specific point  
+function sampleBackgroundColor(x, y) {
+  try {
+    console.log(`*** SAMPLING PIXEL COLOR *** at coordinates (${x}, ${y})`);
+    
+    // Get the content element which contains the background image
+    const content = document.querySelector('.content');
+    const backgroundImage = getComputedStyle(content).backgroundImage;
+    
+    if (backgroundImage && backgroundImage !== 'none') {
+      // Extract the data URL from the CSS background-image property
+      const dataUrlMatch = backgroundImage.match(/url\(["']?(.*?)["']?\)/);
+      if (dataUrlMatch && dataUrlMatch[1]) {
+        const dataUrl = dataUrlMatch[1];
+        
+        // Use the pre-loaded sampling canvas if available
+        if (window.samplingCanvas && window.samplingCtx) {
+          console.log(`Using existing sampling canvas: ${window.samplingCanvas.width}x${window.samplingCanvas.height}`);
+          return sampleFromCanvas(window.samplingCanvas, window.samplingCtx, x, y, content);
+        } else {
+          // Create and load canvas synchronously for this operation
+          console.log('Creating fresh sampling canvas for immediate use');
+          const canvas = document.createElement('canvas');
+          const ctx = canvas.getContext('2d');
+          const img = new Image();
+          
+          // Try to load synchronously (works for data URLs)
+          img.src = dataUrl;
+          
+          if (img.complete || img.width > 0) {
+            canvas.width = img.width;
+            canvas.height = img.height;
+            ctx.drawImage(img, 0, 0);
+            console.log(`Fresh canvas created: ${img.width}x${img.height}`);
+            return sampleFromCanvas(canvas, ctx, x, y, content);
+          } else {
+            console.log('Image not immediately loadable, using default');
+            return '#FFFFFF';
+          }
+        }
+      }
+    }
+    
+    console.log(`No background image found, using white fallback`);
+    return '#FFFFFF';
+  } catch (error) {
+    console.error('Error sampling background color:', error);
+    return '#FFFFFF';
+  }
+}
+
+// Helper function to sample from a canvas
+function sampleFromCanvas(canvas, ctx, x, y, content) {
+  try {
+    // Get content rectangle for coordinate transformation
+    const contentRect = content.getBoundingClientRect();
+    console.log(`Content area: ${contentRect.width}x${contentRect.height}`);
+    console.log(`Canvas size: ${canvas.width}x${canvas.height}`);
+    
+    // Simple direct scaling - assume image fills the entire content area
+    // This works for most screenshot scenarios where background-size is cover
+    const scaleX = canvas.width / contentRect.width;
+    const scaleY = canvas.height / contentRect.height;
+    
+    console.log(`Direct scale factors: X=${scaleX.toFixed(3)}, Y=${scaleY.toFixed(3)}`);
+    
+    // Transform click coordinates directly to canvas coordinates
+    const canvasX = Math.floor(x * scaleX);
+    const canvasY = Math.floor(y * scaleY);
+    
+    // Clamp to canvas bounds
+    const clampedX = Math.max(0, Math.min(canvasX, canvas.width - 1));
+    const clampedY = Math.max(0, Math.min(canvasY, canvas.height - 1));
+    
+    console.log(`Direct transform: click(${x}, ${y}) -> canvas(${clampedX}, ${clampedY})`);
+    
+    // Sample the pixel
+    const imageData = ctx.getImageData(clampedX, clampedY, 1, 1);
+    const data = imageData.data;
+    const color = `rgb(${data[0]}, ${data[1]}, ${data[2]})`;
+    
+    console.log(`*** SAMPLED COLOR: ${color} *** RGBA: (${data[0]}, ${data[1]}, ${data[2]}, ${data[3]})`);
+    return color;
+  } catch (error) {
+    console.error('Error sampling from canvas:', error);
+    return '#FFFFFF';
+  }
 }
 
 // Helper function to check if drawing canvas has content

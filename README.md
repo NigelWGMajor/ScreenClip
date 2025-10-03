@@ -34,6 +34,7 @@ ScreenClip is an advanced screen capture tool with professional annotation capab
 - **Rectangle Shapes**: Draw clean boxes for highlighting areas
 - **Rounded Rectangles**: Stylish rounded corner boxes
 - **Text Annotations**: Add text labels anywhere on the image
+- **Fill Tool**: Erase or fill rectangular areas with background colors
 - **Color Cycling**: 8 colors available (red, orange, yellow, green, blue, grey, white, black)
 
 ### ⌨️ Keyboard Shortcuts
@@ -43,6 +44,7 @@ ScreenClip is an advanced screen capture tool with professional annotation capab
 - **`B`** - Box mode (drag to draw rectangles)
 - **`R`** - Rounded box mode (drag to draw rounded rectangles)
 - **`A`** - Arrow mode (drag to draw arrows)
+- **`F`** - Fill mode (drag to fill rectangles with corner pixel color)
 - **`C`** - Cycle through colors
 - **`Enter`** - Commit drawings to image
 
@@ -58,6 +60,7 @@ ScreenClip is an advanced screen capture tool with professional annotation capab
 ### 🎨 Advanced Drawing Features
 - **Persistent Text Mode**: Add multiple text entries without re-selecting mode
 - **Immediate Text Input**: Click and start typing instantly
+- **Smart Fill Tool**: Fill rectangular areas using corner pixel color for seamless erasing
 - **Visual Feedback**: Border color changes to match drawing color
 - **Professional Quality**: High-DPI support with proper scaling
 - **Smart Commit**: Drawings merge seamlessly with background images
@@ -65,7 +68,7 @@ ScreenClip is an advanced screen capture tool with professional annotation capab
 ### 🖱️ Mouse Controls
 
 #### Drawing Operations
-- **Right-click + Drag**: Draw shapes (arrows, boxes, rounded boxes)
+- **Right-click + Drag**: Draw shapes (arrows, boxes, rounded boxes, fill rectangles)
 - **Left-click (Text Mode)**: Place text input
 - **Mouse Wheel**: Adjust opacity
 - **Shift + Mouse Wheel**: Scale window frame

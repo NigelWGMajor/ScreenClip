@@ -193,6 +193,13 @@ function createWindow() {
           click: () => {
             newWindow.webContents.send('set-drawing-mode', 'text');
           }
+        },
+        {
+          label: 'Fill Mode',
+          type: 'radio',
+          click: () => {
+            newWindow.webContents.send('set-drawing-mode', 'fill');
+          }
         }
       ]
     },
