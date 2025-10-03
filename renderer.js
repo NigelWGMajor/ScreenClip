@@ -166,6 +166,8 @@ function initializeDrawingCanvas() {
     drawingCtx = drawingCanvas.getContext('2d');
     resizeDrawingCanvas();
     debugLog('*** DRAWING CANVAS INITIALIZED ***');
+    console.log(`*** CANVAS DETAILS *** width: ${drawingCanvas.width}, height: ${drawingCanvas.height}`);
+    console.log(`*** CONTEXT OK *** drawingCtx exists: ${!!drawingCtx}`);
   } else {
     debugLog('*** ERROR: Drawing canvas not found! ***');
   }
@@ -1227,6 +1229,9 @@ document.addEventListener('mousemove', async (event) => {
           startBoxDrawing({ clientX: rightClickStartPos.x, clientY: rightClickStartPos.y });
         } else if (drawingMode === 'fill') {
           startFillDrawing({ clientX: rightClickStartPos.x, clientY: rightClickStartPos.y });
+        } else if (drawingMode === 'blur') {
+          console.log(`*** INITIATING BLUR DRAWING *** at (${rightClickStartPos.x}, ${rightClickStartPos.y})`);
+          startBlurDrawing({ clientX: rightClickStartPos.x, clientY: rightClickStartPos.y });
         } else if (drawingMode === 'text') {
           // For text mode, right-click places text at start position
           const content = document.querySelector('.content');
@@ -1256,6 +1261,12 @@ document.addEventListener('mousemove', async (event) => {
     drawingCurrent = { x: event.clientX, y: event.clientY };
     // Draw preview fill rectangle during drag
     drawFillRect(drawingStart.x, drawingStart.y, drawingCurrent.x, drawingCurrent.y, true);
+    return; // Don't process other mouse move logic
+  } else if (isDrawing && drawingMode === 'blur') {
+    console.log(`*** BLUR MOUSE MOVE *** isDrawing: ${isDrawing}, drawingMode: ${drawingMode}`);
+    drawingCurrent = { x: event.clientX, y: event.clientY };
+    // Draw preview blur rectangle during drag
+    drawBlurRect(drawingStart.x, drawingStart.y, drawingCurrent.x, drawingCurrent.y, true);
     return; // Don't process other mouse move logic
   }
   
@@ -1424,6 +1435,31 @@ document.addEventListener('mouseup', (event) => {
     drawingCanvas.style.pointerEvents = 'none'; // Disable canvas interaction
     
     console.log(`Fill completed from (${drawingStart.x}, ${drawingStart.y}) to (${drawingCurrent.x}, ${drawingCurrent.y}), distance: ${dragDistance}`);
+    return;
+  } else if (isDrawing && drawingMode === 'blur') {
+    // Check if we actually dragged enough to warrant preventing context menu
+    const dragDistance = Math.sqrt(
+      Math.pow(drawingCurrent.x - drawingStart.x, 2) + 
+      Math.pow(drawingCurrent.y - drawingStart.y, 2)
+    );
+    
+    if (dragDistance >= MIN_DRAG_DISTANCE) {
+      // Finalize blur rectangle drawing only if we dragged enough
+      debugLog(`*** FINALIZING BLUR DRAWING *** from (${drawingStart.x}, ${drawingStart.y}) to (${drawingCurrent.x}, ${drawingCurrent.y})`);
+      drawBlurRect(drawingStart.x, drawingStart.y, drawingCurrent.x, drawingCurrent.y, false);
+      rightClickDragStarted = true; // Mark that we just finished drawing
+      debugLog('*** BLUR DRAWING COMPLETED *** - context menu temporarily disabled');
+    } else {
+      // Too small to be a real drawing - clear canvas
+      drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+      rightClickDragStarted = false;
+    }
+    
+    // Reset drawing state but keep the mode
+    isDrawing = false;
+    drawingCanvas.style.pointerEvents = 'none'; // Disable canvas interaction
+    
+    console.log(`Blur completed from (${drawingStart.x}, ${drawingStart.y}) to (${drawingCurrent.x}, ${drawingCurrent.y}), distance: ${dragDistance}`);
     return;
   }
   
@@ -1971,6 +2007,16 @@ document.addEventListener('keydown', async (event) => {
         document.body.style.cursor = 'crosshair';
         updateBorderColor();
         debugLog('*** FILL MODE ACTIVATED *** via F key - Right-drag to fill areas');
+      } else if (key === 'b') {
+        // Blur mode for subtle redaction
+        event.preventDefault();
+        event.stopPropagation();
+        setTextMode(false, 'B key pressed');
+        setDrawingMode('blur', 'B key pressed');
+        document.body.style.cursor = 'crosshair';
+        updateBorderColor();
+        debugLog('*** BLUR MODE ACTIVATED *** via B key - Right-drag to blur areas');
+        console.log(`*** BLUR MODE SET *** drawingMode: ${drawingMode}, textMode: ${textMode}`);
       }
     }
   }
@@ -2911,6 +2957,20 @@ function startFillDrawing(event) {
   console.log(`Fill drawing started at (${drawingStart.x}, ${drawingStart.y})`);
 }
 
+// Start blur drawing (right-click)
+function startBlurDrawing(event) {
+  isDrawing = true;
+  console.log(`*** STARTING BLUR DRAWING *** in mode: ${drawingMode}`);
+  console.log(`*** BLUR DRAWING INITIATED *** isDrawing: ${isDrawing}, drawingMode: ${drawingMode}`);
+  drawingStart = { x: event.clientX, y: event.clientY };
+  drawingCurrent = { x: event.clientX, y: event.clientY };
+  
+  // Enable pointer events on canvas for drawing
+  drawingCanvas.style.pointerEvents = 'auto';
+  
+  console.log(`Blur drawing started at (${drawingStart.x}, ${drawingStart.y})`);
+}
+
 // Draw box from start to end point
 function drawBox(startX, startY, endX, endY, preview = false) {
   if (!drawingCtx) return;
@@ -3027,6 +3087,232 @@ function drawFillRect(startX, startY, endX, endY, preview = false) {
     drawingCtx.fillStyle = fillColor;
     drawingCtx.fillRect(left, top, width, height);
     console.log(`*** FILL RECTANGLE COMPLETED *** with color: ${fillColor}`);
+  }
+}
+
+// Draw blurred rectangle from start to end point (applies blur effect)
+function drawBlurRect(startX, startY, endX, endY, preview = false) {
+  if (!drawingCtx) return;
+  
+  // Clear canvas if this is a preview
+  if (preview) {
+    drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+  }
+  
+  // Calculate rectangle dimensions
+  const left = Math.min(startX, endX);
+  const top = Math.min(startY, endY);
+  const width = Math.abs(endX - startX);
+  const height = Math.abs(endY - startY);
+  
+  console.log(`Drawing blur rectangle from (${startX}, ${startY}) to (${endX}, ${endY})`);
+  console.log(`Blur rectangle bounds: left=${left}, top=${top}, width=${width}, height=${height}`);
+  
+  if (preview) {
+    // For preview, draw a dashed rectangle with blur indication
+    drawingCtx.strokeStyle = '#ff0000';
+    drawingCtx.lineWidth = 2;
+    drawingCtx.setLineDash([5, 5]); // Dashed line for preview
+    drawingCtx.strokeRect(left, top, width, height);
+    drawingCtx.setLineDash([]); // Reset line dash
+    
+    // Add a semi-transparent overlay to show what will be blurred
+    drawingCtx.fillStyle = 'rgba(128, 128, 128, 0.5)';
+    drawingCtx.fillRect(left, top, width, height);
+  } else {
+    // For final drawing, DON'T draw anything to canvas - just store blur area
+    // The commit system will apply the actual blur effect to the background image
+    
+    // Store blur area for commit processing (needed for actual blur effect)
+    if (!drawingCanvas.blurAreas) {
+      drawingCanvas.blurAreas = [];
+    }
+    
+    drawingCanvas.blurAreas.push({
+      x: left,
+      y: top,
+      width: width,
+      height: height
+    });
+    
+    console.log(`*** BLUR AREA STORED *** areas: ${drawingCanvas.blurAreas.length} (no canvas drawing for final blur)`);
+  }
+}
+
+// Helper function to apply blur effect to a specific area of the background image
+function applyBlurToArea(x, y, width, height) {
+  try {
+    console.log(`*** APPLYING BLUR TO AREA *** (${x}, ${y}) ${width}x${height}`);
+    
+    // Get the content element which contains the background image
+    const content = document.querySelector('.content');
+    const backgroundImage = getComputedStyle(content).backgroundImage;
+    
+    if (backgroundImage && backgroundImage !== 'none') {
+      // Extract the data URL from the CSS background-image property
+      const dataUrlMatch = backgroundImage.match(/url\(["']?(.*?)["']?\)/);
+      if (dataUrlMatch && dataUrlMatch[1]) {
+        const dataUrl = dataUrlMatch[1];
+        console.log(`Found background image for blur processing`);
+        
+        // Create a fresh canvas with the background image
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        const img = new Image();
+        
+        img.src = dataUrl;
+        
+        if (img.complete && img.width > 0) {
+          canvas.width = img.width;
+          canvas.height = img.height;
+          ctx.drawImage(img, 0, 0);
+          console.log(`Blur canvas ready: ${img.width}x${img.height}`);
+          
+          // Transform drawing coordinates to image coordinates
+          const blurArea = transformDrawingCoordsToImage(x, y, width, height, content, canvas);
+          
+          if (blurArea) {
+            // Apply blur effect to the specific area
+            applyBlurEffect(ctx, canvas, blurArea.x, blurArea.y, blurArea.width, blurArea.height);
+            
+            // Update the background image with the blurred version
+            const blurredDataUrl = canvas.toDataURL('image/png');
+            content.style.backgroundImage = `url(${blurredDataUrl})`;
+            console.log(`*** BLUR EFFECT APPLIED *** to area successfully`);
+          }
+        }
+      }
+    }
+  } catch (error) {
+    console.error('Error applying blur effect:', error);
+  }
+}
+
+// Helper function to transform drawing coordinates to image coordinates
+function transformDrawingCoordsToImage(x, y, width, height, content, canvas) {
+  try {
+    // Get content properties for coordinate transformation
+    const style = getComputedStyle(content);
+    const backgroundSize = style.backgroundSize;
+    const backgroundPosition = style.backgroundPosition;
+    
+    // Parse background size (e.g., "1920px 1080px")
+    const sizeParts = backgroundSize.split(' ');
+    const bgWidth = parseFloat(sizeParts[0]);
+    const bgHeight = parseFloat(sizeParts[1]) || bgWidth;
+    
+    // Parse background position (e.g., "0px 0px")  
+    const posParts = backgroundPosition.split(' ');
+    const bgPosX = parseFloat(posParts[0]) || 0;
+    const bgPosY = parseFloat(posParts[1]) || 0;
+    
+    // Transform drawing coordinates to image coordinates
+    const imageX = x - bgPosX;
+    const imageY = y - bgPosY;
+    
+    // Scale from displayed size to actual canvas size
+    const scaleX = canvas.width / bgWidth;
+    const scaleY = canvas.height / bgHeight;
+    
+    const canvasX = Math.floor(imageX * scaleX);
+    const canvasY = Math.floor(imageY * scaleY);
+    const canvasWidth = Math.floor(width * scaleX);
+    const canvasHeight = Math.floor(height * scaleY);
+    
+    // Clamp to canvas bounds
+    const clampedX = Math.max(0, Math.min(canvasX, canvas.width - 1));
+    const clampedY = Math.max(0, Math.min(canvasY, canvas.height - 1));
+    const clampedWidth = Math.max(1, Math.min(canvasWidth, canvas.width - clampedX));
+    const clampedHeight = Math.max(1, Math.min(canvasHeight, canvas.height - clampedY));
+    
+    console.log(`Blur transform: drawing(${x}, ${y}, ${width}x${height}) -> canvas(${clampedX}, ${clampedY}, ${clampedWidth}x${clampedHeight})`);
+    
+    return {
+      x: clampedX,
+      y: clampedY,
+      width: clampedWidth,
+      height: clampedHeight
+    };
+  } catch (error) {
+    console.error('Error transforming coordinates for blur:', error);
+    return null;
+  }
+}
+
+// Helper function to apply blur effect to a specific area of the canvas
+function applyBlurEffect(ctx, canvas, x, y, width, height) {
+  try {
+    console.log(`Applying blur to canvas area: (${x}, ${y}) ${width}x${height}`);
+    
+    // Get the image data for the area to blur
+    const imageData = ctx.getImageData(x, y, width, height);
+    const data = imageData.data;
+    
+    // Create a simple box blur effect
+    const blurRadius = 8; // Adjust this for stronger/weaker blur
+    const tempData = new Uint8ClampedArray(data);
+    
+    // Apply horizontal blur pass
+    for (let py = 0; py < height; py++) {
+      for (let px = 0; px < width; px++) {
+        let r = 0, g = 0, b = 0, a = 0, count = 0;
+        
+        // Sample pixels in blur radius
+        for (let bx = -blurRadius; bx <= blurRadius; bx++) {
+          const sx = px + bx;
+          if (sx >= 0 && sx < width) {
+            const idx = (py * width + sx) * 4;
+            r += tempData[idx];
+            g += tempData[idx + 1];
+            b += tempData[idx + 2];
+            a += tempData[idx + 3];
+            count++;
+          }
+        }
+        
+        const idx = (py * width + px) * 4;
+        data[idx] = r / count;
+        data[idx + 1] = g / count;
+        data[idx + 2] = b / count;
+        data[idx + 3] = a / count;
+      }
+    }
+    
+    // Copy for vertical pass
+    tempData.set(data);
+    
+    // Apply vertical blur pass
+    for (let px = 0; px < width; px++) {
+      for (let py = 0; py < height; py++) {
+        let r = 0, g = 0, b = 0, a = 0, count = 0;
+        
+        // Sample pixels in blur radius
+        for (let by = -blurRadius; by <= blurRadius; by++) {
+          const sy = py + by;
+          if (sy >= 0 && sy < height) {
+            const idx = (sy * width + px) * 4;
+            r += tempData[idx];
+            g += tempData[idx + 1];
+            b += tempData[idx + 2];
+            a += tempData[idx + 3];
+            count++;
+          }
+        }
+        
+        const idx = (py * width + px) * 4;
+        data[idx] = r / count;
+        data[idx + 1] = g / count;
+        data[idx + 2] = b / count;
+        data[idx + 3] = a / count;
+      }
+    }
+    
+    // Put the blurred image data back
+    ctx.putImageData(imageData, x, y);
+    console.log(`Blur effect applied with radius ${blurRadius}`);
+    
+  } catch (error) {
+    console.error('Error applying blur effect:', error);
   }
 }
 
@@ -3189,7 +3475,12 @@ function checkIfCanvasHasContent() {
   }
   
   debugLog(`*** NON-TRANSPARENT PIXELS *** ${nonTransparentPixels}`);
-  return nonTransparentPixels > 0;
+  
+  // Also check for stored blur areas
+  const hasBlurAreas = drawingCanvas.blurAreas && drawingCanvas.blurAreas.length > 0;
+  debugLog(`*** BLUR AREAS *** ${hasBlurAreas ? drawingCanvas.blurAreas.length : 0}`);
+  
+  return nonTransparentPixels > 0 || hasBlurAreas;
 }
 
 // Helper function to update border color to reflect current drawing color
@@ -3321,10 +3612,15 @@ function commitDrawingToImage() {
   const content = document.querySelector('.content');
   const backgroundImage = getComputedStyle(content).backgroundImage;
   
-  console.log('Commit function called, backgroundImage:', backgroundImage);
+  console.log('*** COMMIT FUNCTION CALLED ***');
+  console.log('backgroundImage exists:', backgroundImage !== 'none');
   console.log('drawingCanvas exists:', !!drawingCanvas);
+  console.log('drawingCanvas.blurAreas:', drawingCanvas?.blurAreas?.length || 0);
   
   if (backgroundImage && backgroundImage !== 'none' && drawingCanvas) {
+    console.log(`*** COMMIT CONDITIONS MET *** Starting commit process`);
+    console.log(`*** BLUR AREAS CHECK *** drawingCanvas.blurAreas:`, drawingCanvas.blurAreas);
+    
     try {
       // Get the current background image
       const img = new Image();
@@ -3342,7 +3638,7 @@ function commitDrawingToImage() {
         // Draw the original background image at full resolution
         combinedCtx.drawImage(img, 0, 0);
         
-        // Get the display dimensions and position of the background
+        // Get the display dimensions and position of the background FIRST
         const backgroundSize = getComputedStyle(content).backgroundSize;
         const backgroundPosition = getComputedStyle(content).backgroundPosition;
         
@@ -3355,7 +3651,6 @@ function commitDrawingToImage() {
         const offsetY = parseFloat(positionParts[1]) || 0;
         
         // Calculate scaling factors from display size to original image size
-        // Also account for current image scale
         const scaleX = img.width / displayWidth;
         const scaleY = img.height / displayHeight;
         
@@ -3365,19 +3660,61 @@ function commitDrawingToImage() {
         console.log('Current image scale:', currentImageScale);
         console.log('Scaling factors - X:', scaleX, 'Y:', scaleY);
         
-        // Apply transformations to properly place the drawing overlay
-        combinedCtx.save();
+        // Process any blur areas before applying drawing overlay
+        if (drawingCanvas.blurAreas && drawingCanvas.blurAreas.length > 0) {
+          console.log(`*** COMMIT: Processing ${drawingCanvas.blurAreas.length} blur areas ***`);
+          console.log('Blur areas to process:', drawingCanvas.blurAreas);
+          
+          for (const blurArea of drawingCanvas.blurAreas) {
+            // Transform blur area coordinates to original image coordinates
+            const imageBlurArea = {
+              x: Math.floor((blurArea.x - offsetX) * scaleX),
+              y: Math.floor((blurArea.y - offsetY) * scaleY),
+              width: Math.floor(blurArea.width * scaleX),
+              height: Math.floor(blurArea.height * scaleY)
+            };
+            
+            // Clamp to image bounds
+            imageBlurArea.x = Math.max(0, Math.min(imageBlurArea.x, img.width - 1));
+            imageBlurArea.y = Math.max(0, Math.min(imageBlurArea.y, img.height - 1));
+            imageBlurArea.width = Math.max(1, Math.min(imageBlurArea.width, img.width - imageBlurArea.x));
+            imageBlurArea.height = Math.max(1, Math.min(imageBlurArea.height, img.height - imageBlurArea.y));
+            
+            console.log(`Applying blur to image area: (${imageBlurArea.x}, ${imageBlurArea.y}) ${imageBlurArea.width}x${imageBlurArea.height}`);
+            
+            // Apply blur effect directly to the combined canvas
+            applyBlurEffect(combinedCtx, combinedCanvas, imageBlurArea.x, imageBlurArea.y, imageBlurArea.width, imageBlurArea.height);
+          }
+          
+          // Clear blur areas after processing
+          drawingCanvas.blurAreas = [];
+          
+          // For blur-only commits, clear the canvas since we don't need visible overlays
+          // (blur effect was already applied to the combined canvas above)
+          drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+          console.log('*** BLUR AREAS PROCESSED - CANVAS CLEARED ***');
+        }
         
-        // First scale to match the original image resolution
-        combinedCtx.scale(scaleX, scaleY);
+        // Check if we still have any visible drawing content to overlay
+        const hasVisibleDrawingContent = checkIfCanvasHasContent();
+        console.log('*** HAS VISIBLE DRAWING CONTENT AFTER BLUR PROCESSING ***', hasVisibleDrawingContent);
         
-        // Then translate to account for background positioning offset
-        combinedCtx.translate(-offsetX, -offsetY);
-        
-        // Draw the overlay canvas
-        combinedCtx.drawImage(drawingCanvas, 0, 0);
-        
-        combinedCtx.restore();
+        // Only apply drawing overlay if there's visible content remaining
+        if (hasVisibleDrawingContent) {
+          // Apply transformations to properly place the drawing overlay
+          combinedCtx.save();
+          
+          // First scale to match the original image resolution
+          combinedCtx.scale(scaleX, scaleY);
+          
+          // Then translate to account for background positioning offset
+          combinedCtx.translate(-offsetX, -offsetY);
+          
+          // Draw the overlay canvas
+          combinedCtx.drawImage(drawingCanvas, 0, 0);
+          
+          combinedCtx.restore();
+        }
         
         // Convert to data URL and update background
         const newDataUrl = combinedCanvas.toDataURL('image/png');
@@ -3385,6 +3722,11 @@ function commitDrawingToImage() {
         
         // Clear the drawing canvas
         drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+        
+        // Clear any stored blur areas
+        if (drawingCanvas.blurAreas) {
+          drawingCanvas.blurAreas = [];
+        }
         
         console.log('Drawing committed to image successfully with proper scaling and offset');
       };

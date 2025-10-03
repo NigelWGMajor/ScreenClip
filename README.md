@@ -35,16 +35,18 @@ ScreenClip is an advanced screen capture tool with professional annotation capab
 - **Rounded Rectangles**: Stylish rounded corner boxes
 - **Text Annotations**: Add text labels anywhere on the image
 - **Fill Tool**: Erase or fill rectangular areas with background colors
+- **Blur Tool**: Subtly redact sensitive information with blur effect
 - **Color Cycling**: 8 colors available (red, orange, yellow, green, blue, grey, white, black)
 
 ### ⌨️ Keyboard Shortcuts
 
 #### Drawing Mode Shortcuts
 - **`T`** - Text mode (click to place text)
-- **`B`** - Box mode (drag to draw rectangles)
+- **`S`** - Sharp box mode (drag to draw rectangles) 
 - **`R`** - Rounded box mode (drag to draw rounded rectangles)
 - **`A`** - Arrow mode (drag to draw arrows)
 - **`F`** - Fill mode (drag to fill rectangles with corner pixel color)
+- **`B`** - Blur mode (drag to blur rectangles for redaction)
 - **`C`** - Cycle through colors
 - **`Enter`** - Commit drawings to image
 
@@ -90,10 +92,16 @@ ScreenClip is an advanced screen capture tool with professional annotation capab
 5. Press `Enter` to commit all text to image
 
 ### Shape Highlighting
-1. Press `B` for box mode or `R` for rounded boxes
+1. Press `S` for sharp box mode or `R` for rounded boxes
 2. Right-click and drag to draw rectangles
 3. Press `C` to change colors
 4. Press `Enter` to commit drawings
+
+### Subtle Redaction
+1. Press `B` for blur mode
+2. Right-click and drag over sensitive information
+3. Blur effect obscures content while maintaining readability context
+4. Press `Enter` to commit blur effects
 
 ### Professional Arrows
 1. Press `A` for arrow mode
@@ -143,9 +151,10 @@ ScreenClip is an advanced screen capture tool with professional annotation capab
 3. **Capture**: `Win+Esc` → drag selection area
 4. **Annotate**: 
    - Press `T` → click → type text → `Enter`
-   - Press `B` → right-click drag → draw box
+   - Press `S` → right-click drag → draw sharp box
    - Press `R` → right-click drag → draw rounded box  
    - Press `A` → right-click drag → draw arrow
+   - Press `B` → right-click drag → blur area for redaction
    - Press `C` → cycle colors
 5. **Commit**: Press `Enter` to commit all drawings
 6. **Effects**: `Ctrl+I` invert, `Ctrl+B` toggle border
