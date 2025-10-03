@@ -47,6 +47,18 @@
       pointer-events: none;
       display: none;
       z-index: 1000;
+      box-shadow: 0 0 10px rgba(0, 128, 255, 0.5);
+    }
+    
+    #selection.selectable {
+      pointer-events: auto;
+      cursor: pointer;
+    }
+    
+    #selection.selectable:hover {
+      border-color: #00a0ff;
+      background: rgba(0, 160, 255, 0.25);
+      box-shadow: 0 0 15px rgba(0, 160, 255, 0.7);
     }
     
     #instructions {
@@ -65,13 +77,10 @@
   </style>
 </head>
 <body tabindex="-1">
-  <div id="instructions">Drag to select area → Redrag to adjust → Enter to confirm → ESC to cancel → Right-click for menu</div>
+  <div id="instructions">Drag to select area → Click inside selection to confirm → Click outside to redrag → ESC to cancel</div>
   <img id="screenshot" />
   <div id="overlay"></div>
   <div id="selection"></div>
-  
-  <!-- Backup confirmation button (shown when selection exists) -->
-  <button id="confirmButton" style="display: none; position: absolute; z-index: 2000; padding: 10px 20px; background: #0080ff; color: white; border: none; border-radius: 5px; font-size: 16px; cursor: pointer;">Confirm Selection (Enter)</button>
   
   <script src="selection.js"></script>
 </body>

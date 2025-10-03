@@ -11,7 +11,6 @@ let isConfirming = false; // Prevent double confirmation
 const screenshot = document.getElementById('screenshot');
 const overlay = document.getElementById('overlay');
 const selection = document.getElementById('selection');
-const confirmButton = document.getElementById('confirmButton');
 
 // Listen for screenshot data from main process
 ipcRenderer.on('show-screenshot-for-selection', (event, data) => {
@@ -24,18 +23,40 @@ ipcRenderer.on('show-screenshot-for-selection', (event, data) => {
   console.log('Screenshot loaded for selection');
 });
 
-// Handle mouse down - start selection immediately
+// Helper function to check if a point is within the selection rectangle
+function isPointInSelection(x, y, bounds) {
+  return x >= bounds.left && 
+         x <= bounds.left + bounds.width && 
+         y >= bounds.top && 
+         y <= bounds.top + bounds.height;
+}
+
+// Handle mouse down - check if clicking inside existing selection or start new selection
 document.addEventListener('mousedown', (event) => {
   if (event.button === 0) { // Left mouse button
     event.preventDefault(); // Prevent default drag behavior
     
+    console.log(`Mouse down at (${event.clientX}, ${event.clientY})`);
+    console.log('Current selectionBounds:', selectionBounds);
+    
+    // If we have an existing selection and click is inside it, confirm the selection
+    if (selectionBounds && isPointInSelection(event.clientX, event.clientY, selectionBounds)) {
+      console.log(`Click INSIDE selection at (${event.clientX}, ${event.clientY}) - confirming selection`);
+      event.stopPropagation(); // Prevent any other handlers
+      confirmSelection();
+      return; // Don't start new selection
+    }
+    
+    console.log(`Click OUTSIDE selection at (${event.clientX}, ${event.clientY}) - starting new selection`);
+    
+    // Start new selection (clicking outside existing selection or no selection exists)
     isSelecting = true;
     startX = event.clientX;
     startY = event.clientY;
     
     // Clear any previous selection
     selectionBounds = null;
-    hideConfirmButton();
+    selection.classList.remove('selectable');
     
     selection.style.left = startX + 'px';
     selection.style.top = startY + 'px';
@@ -43,11 +64,11 @@ document.addEventListener('mousedown', (event) => {
     selection.style.height = '0px';
     selection.style.display = 'block';
     
-    console.log(`Selection started immediately at (${startX}, ${startY})`);
+    console.log(`New selection started at (${startX}, ${startY})`);
   }
 });
 
-// Handle mouse move - update selection rectangle
+// Handle mouse move - update selection rectangle and cursor
 document.addEventListener('mousemove', (event) => {
   if (isSelecting) {
     event.preventDefault();
@@ -64,10 +85,18 @@ document.addEventListener('mousemove', (event) => {
     selection.style.top = top + 'px';
     selection.style.width = width + 'px';
     selection.style.height = height + 'px';
+    selection.style.display = 'block'; // Ensure it's visible during drag
     
     // Debug output every 50px of movement to avoid spam
     if (width % 50 < 5 && height % 50 < 5) {
       console.log(`Dragging: ${width}x${height} at (${left}, ${top})`);
+    }
+  } else {
+    // Not dragging - check if cursor is over existing selection for feedback
+    if (selectionBounds && isPointInSelection(event.clientX, event.clientY, selectionBounds)) {
+      document.body.style.cursor = 'pointer'; // Show clickable cursor
+    } else {
+      document.body.style.cursor = 'crosshair'; // Default selection cursor
     }
   }
 });
@@ -102,19 +131,19 @@ document.addEventListener('mouseup', (event) => {
       selection.style.height = height + 'px';
       selection.style.display = 'block';
       
+      // Make selection clickable after drag completes
+      selection.classList.add('selectable');
+      
       // Ensure focus is maintained after selection
       document.body.focus();
       
-      // Show confirm button as backup
-      showConfirmButton(left + width + 10, top);
-      
-      console.log(`SELECTION SAVED: ${width}x${height} at (${left}, ${top}) - drag to adjust or press Enter to confirm`);
+      console.log(`SELECTION SAVED: ${width}x${height} at (${left}, ${top}) - click inside to confirm, click outside to redrag`);
       console.log('selectionBounds:', selectionBounds);
     } else {
       // Too small selection, clear it
       selection.style.display = 'none';
+      selection.classList.remove('selectable');
       selectionBounds = null;
-      hideConfirmButton();
       console.log('Selection too small, cleared');
     }
   }
@@ -137,9 +166,6 @@ function confirmSelection() {
   isConfirming = true;
   console.log(`Confirming selection: ${selectionBounds.width}x${selectionBounds.height} at (${selectionBounds.left}, ${selectionBounds.top})`);
   
-  // Close selection window immediately to prevent visual blocking
-  console.log('Closing selection window immediately');
-  
   // Send selection data back to main process
   const selectionData = {
     left: selectionBounds.left,
@@ -148,7 +174,8 @@ function confirmSelection() {
     height: selectionBounds.height,
     screenshot: currentScreenshot,
     displayBounds: displayInfo.displayBounds,
-    scaleFactor: displayInfo.scaleFactor
+    scaleFactor: displayInfo.scaleFactor,
+    isFirstCapture: true // Let main process determine this based on window count
   };
   
   console.log('Sending selection data to main process...');
@@ -192,25 +219,14 @@ window.addEventListener('load', () => {
   console.log('Selection window loaded and ready for keyboard input');
 });
 
-// Helper functions for confirm button
-function showConfirmButton(x, y) {
-  confirmButton.style.display = 'block';
-  confirmButton.style.left = Math.min(x, window.innerWidth - 200) + 'px'; // Keep within window
-  confirmButton.style.top = y + 'px';
-}
+console.log('Selection interface initialized');
 
-function hideConfirmButton() {
-  confirmButton.style.display = 'none';
-}
-
-// Click handler for confirm button
-confirmButton.addEventListener('click', (event) => {
+// Add click handler directly to the selection element
+selection.addEventListener('click', (event) => {
   event.preventDefault();
   event.stopPropagation();
-  console.log('Confirm button clicked');
-  if (selectionBounds) {
+  console.log('Selection div clicked directly');
+  if (selectionBounds && selection.classList.contains('selectable')) {
     confirmSelection();
   }
 });
-
-console.log('Selection interface initialized');

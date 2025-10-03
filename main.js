@@ -1579,54 +1579,7 @@ function registerSelectionShortcuts(selectionWindow) {
   // Unregister any existing selection shortcuts first
   unregisterSelectionShortcuts();
   
-  // Register Enter for confirmation
-  const enterRegistered = globalShortcut.register('Return', () => {
-    const now = Date.now();
-    if (now - lastShortcutTime < 500) { // Increase debounce to 500ms
-      console.log('Global Enter - debounced (too quick)');
-      return;
-    }
-    lastShortcutTime = now;
-    
-    console.log('Global Enter pressed - confirming selection');
-    if (selectionWindow && !selectionWindow.isDestroyed()) {
-      // Get selection data first, then close window immediately
-      selectionWindow.webContents.executeJavaScript(`
-        if (selectionBounds && !isConfirming) {
-          // Return selection data to main process
-          ({ 
-            selectionData: {
-              left: selectionBounds.left,
-              top: selectionBounds.top,
-              width: selectionBounds.width,
-              height: selectionBounds.height,
-              screenshot: currentScreenshot,
-              displayBounds: displayInfo.displayBounds,
-              scaleFactor: displayInfo.scaleFactor
-            }
-          })
-        } else {
-          ({ selectionData: null })
-        }
-      `).then((result) => {
-        if (result && result.selectionData) {
-          console.log('Got selection data, closing window and creating new window');
-          // Close selection window immediately
-          if (!selectionWindow.isDestroyed()) {
-            selectionWindow.close();
-          }
-          // Process selection directly in main process
-          processSelectionData(result.selectionData);
-        } else {
-          console.log('No selection data available');
-        }
-      }).catch((error) => {
-        console.error('Error getting selection data:', error);
-      });
-    }
-  });
-  
-  // Register Escape for cancel  
+  // Only register Escape for cancel (Enter is now handled by click)
   const escapeRegistered = globalShortcut.register('Escape', () => {
     console.log('Global Escape pressed - canceling selection');
     if (selectionWindow && !selectionWindow.isDestroyed()) {
@@ -1636,12 +1589,6 @@ function registerSelectionShortcuts(selectionWindow) {
     // Unregister selection shortcuts when canceled
     unregisterSelectionShortcuts();
   });
-  
-  if (enterRegistered) {
-    console.log('Selection Enter shortcut registered');
-  } else {
-    console.log('Failed to register selection Enter shortcut');
-  }
   
   if (escapeRegistered) {
     console.log('Selection Escape shortcut registered');
@@ -1653,7 +1600,6 @@ function registerSelectionShortcuts(selectionWindow) {
 // Unregister selection-specific shortcuts
 function unregisterSelectionShortcuts() {
   try {
-    globalShortcut.unregister('Return');
     globalShortcut.unregister('Escape');
     console.log('Selection shortcuts unregistered');
   } catch (error) {
@@ -1673,7 +1619,7 @@ async function captureScreenWithSelection() {
     // Create or find a window for the selection interface
     let selectionWindow = createSelectionWindow(currentDisplay);
     
-    // Register temporary global shortcuts for selection window
+    // Register only Escape shortcut for selection window (Enter now handled by click)
     registerSelectionShortcuts(selectionWindow);
     
     // Capture the current screen
@@ -1893,16 +1839,28 @@ ipcMain.handle('process-screen-selection', async (event, selectionData) => {
       area: `${selectionData.width}x${selectionData.height} at (${selectionData.left}, ${selectionData.top})`
     });
     
-    // Create a new ScreenClip window with the selected area
-    const newWindow = createWindow();
+    // Determine if this is the first capture by checking if mainWindow exists and has no content
+    // The main window is created on app start but has no image content until first capture
+    const isFirstCapture = mainWindow && !mainWindow.isDestroyed() && windows.length === 1;
+    let targetWindow;
     
-    // Wait for the window to be ready
-    await new Promise(resolve => {
-      newWindow.once('ready-to-show', resolve);
-    });
-    
-    // Additional wait to ensure renderer is fully loaded
-    await new Promise(resolve => setTimeout(resolve, 100));
+    if (isFirstCapture) {
+      // Use the existing main window for the first capture
+      targetWindow = mainWindow;
+      console.log('Using existing main window for first capture (windows.length=' + windows.length + ')');
+    } else {
+      // Create a new window for subsequent captures
+      targetWindow = createWindow();
+      console.log('Creating new window for subsequent capture (windows.length=' + windows.length + ')');
+      
+      // Wait for the window to be ready
+      await new Promise(resolve => {
+        targetWindow.once('ready-to-show', resolve);
+      });
+      
+      // Additional wait to ensure renderer is fully loaded
+      await new Promise(resolve => setTimeout(resolve, 100));
+    }
     
     // Calculate the crop area in the original screenshot coordinates
     const scaleFactor = selectionData.scaleFactor;
@@ -1913,29 +1871,33 @@ ipcMain.handle('process-screen-selection', async (event, selectionData) => {
     
     console.log(`Crop calculations: ${cropWidth}x${cropHeight} at (${cropX}, ${cropY}), scaleFactor: ${scaleFactor}`);
     
-    // Position and size the window to match the selected area (plus border)
-    const borderWidth = 4; // 2px border on each side
-    
-    // Account for potential system window offset (invisible title bar, etc.)
-    const systemOffsetY = -8; // Adjust for Windows invisible title bar
-    
+    // Position and size the window to match the selected area exactly (border is ignored)
+    // This ensures no movement when border is toggled and consistent sizing
     const newBounds = {
       x: Math.round(selectionData.displayBounds.x + selectionData.left),
-      y: Math.round(selectionData.displayBounds.y + selectionData.top + systemOffsetY),
-      width: Math.round(selectionData.width + borderWidth),
-      height: Math.round(selectionData.height + borderWidth)
+      y: Math.round(selectionData.displayBounds.y + selectionData.top),
+      width: Math.round(selectionData.width),
+      height: Math.round(selectionData.height)
     };
     
-    newWindow.setBounds(newBounds);
+    targetWindow.setBounds(newBounds);
     
-    // Ensure always-on-top behavior is maintained  
-    newWindow.setAlwaysOnTop(true, 'normal');
-    newWindow.focus();
+    // Ensure window is visible and focused (especially important if main window was minimized)
+    if (isFirstCapture) {
+      targetWindow.show(); // Explicitly show the window
+      targetWindow.restore(); // Restore if minimized
+    }
+    targetWindow.setAlwaysOnTop(true, 'normal');
+    targetWindow.focus();
+    targetWindow.moveTop(); // Bring to front
     
-    console.log(`New window positioned at (${newBounds.x}, ${newBounds.y}) and sized to: ${newBounds.width}x${newBounds.height}`);
+    // Small delay to ensure window operations complete
+    await new Promise(resolve => setTimeout(resolve, 50));
     
-    // Send the selection data to the new window to crop and display
-    newWindow.webContents.send('load-selected-area', {
+    console.log(`Window positioned at (${newBounds.x}, ${newBounds.y}) and sized to: ${newBounds.width}x${newBounds.height}`);
+    
+    // Send the selection data to the window to crop and display
+    targetWindow.webContents.send('load-selected-area', {
       screenshot: selectionData.screenshot,
       cropArea: {
         x: cropX,
@@ -1954,12 +1916,13 @@ ipcMain.handle('process-screen-selection', async (event, selectionData) => {
       scaleFactor: scaleFactor
     });
     
-    console.log('Selection data sent to new window');
+    console.log('Selection data sent to target window');
     
-    console.log(`Created new window with selected area: ${selectionData.width}x${selectionData.height}`);
-    
-    // Unregister selection shortcuts since selection is confirmed
-    unregisterSelectionShortcuts();
+    if (isFirstCapture) {
+      console.log(`Updated main window with selected area: ${selectionData.width}x${selectionData.height}`);
+    } else {
+      console.log(`Created new window with selected area: ${selectionData.width}x${selectionData.height}`);
+    }
     
     return { success: true };
   } catch (error) {

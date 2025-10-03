@@ -80,3 +80,26 @@ right-click position samples screen for transparency and fill
 - tray icon
 - auto start with windows
 - auto update
+
+
+## demo-test 
+
+Start: 
+`npm install`
+`npm start`
+- App minimizes to system tray
+win+esc
+- Drag a blue box
+- can drag many times
+- enter to lock into red box
+! Should be able to just click inside box to snap
+! Don't dispay the prompt
+- double-click to snap
+- mouse wheel should fade
+! fade should start smoothly
+- ctrl-i to invert (2)
+- ctrl-b for border (2)
+- shift-wheel or shift-drag for frame
+- ctrl-wheel or ctrl-drag for content
+- both for both
+
