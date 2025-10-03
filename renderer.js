@@ -836,6 +836,16 @@ document.addEventListener('wheel', (event) => {
     // Normal wheel: Adjust opacity of .content div (which contains the image)
     // Up (deltaY < 0): more opaque, Down (deltaY > 0): more transparent
     const content = document.querySelector('.content');
+    
+    // Synchronize currentOpacity with actual CSS opacity on first wheel use
+    if (content) {
+      const actualOpacity = parseFloat(getComputedStyle(content).opacity) || 1.0;
+      if (Math.abs(currentOpacity - actualOpacity) > 0.01) {
+        console.log(`Synchronizing opacity: ${currentOpacity} → ${actualOpacity}`);
+        currentOpacity = actualOpacity;
+      }
+    }
+    
     const delta = event.deltaY < 0 ? 0.05 : -0.05;
     currentOpacity += delta;
     currentOpacity = Math.max(0.05, Math.min(1.0, currentOpacity));
