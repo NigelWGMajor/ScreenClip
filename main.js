@@ -2,6 +2,11 @@ const { app, BrowserWindow, Menu, ipcMain, screen, nativeImage, desktopCapturer,
 const path = require('path');
 const fs = require('fs');
 
+// Debug log handler to show renderer debug messages in terminal
+ipcMain.on('debug-log', (event, message) => {
+  console.log(`[RENDERER DEBUG] ${message}`);
+});
+
 let mainWindow;
 let windows = []; // Array to track all windows
 let tray = null; // System tray instance
@@ -154,6 +159,59 @@ function createWindow() {
             bubbles: true
           }));
         `);
+      }
+    },
+    { type: 'separator' },
+    {
+      label: 'Drawing Mode',
+      submenu: [
+        {
+          label: 'Arrow Mode',
+          type: 'radio',
+          checked: true, // Default mode
+          click: () => {
+            newWindow.webContents.send('set-drawing-mode', 'arrow');
+          }
+        },
+        {
+          label: 'Box Mode',
+          type: 'radio',
+          click: () => {
+            newWindow.webContents.send('set-drawing-mode', 'box');
+          }
+        },
+        {
+          label: 'Rounded Box Mode',
+          type: 'radio',
+          click: () => {
+            newWindow.webContents.send('set-drawing-mode', 'rounded-box');
+          }
+        },
+        {
+          label: 'Text Mode',
+          type: 'radio',
+          click: () => {
+            newWindow.webContents.send('set-drawing-mode', 'text');
+          }
+        }
+      ]
+    },
+    {
+      label: 'Change Color (C)',
+      click: () => {
+        // Trigger the same action as C keyboard shortcut
+        newWindow.webContents.executeJavaScript(`
+          document.dispatchEvent(new KeyboardEvent('keydown', {
+            key: 'c',
+            bubbles: true
+          }));
+        `);
+      }
+    },
+    {
+      label: 'Commit Drawing (Enter)',
+      click: () => {
+        newWindow.webContents.send('commit-drawing');
       }
     },
     { type: 'separator' },
@@ -1945,13 +2003,21 @@ ipcMain.handle('show-selection-context-menu', async (event, data) => {
       click: () => {
         // Call confirmation function directly instead of synthetic keyboard events
         senderWindow.webContents.executeJavaScript(`
-          if (typeof confirmSelection === 'function' && selectionBounds) {
-            console.log('Context menu confirming selection');
-            confirmSelection();
-          } else {
-            console.log('Context menu: No selection to confirm');
-          }
-        `);
+          (function() {
+            if (typeof confirmSelection === 'function' && typeof selectionBounds !== 'undefined' && selectionBounds) {
+              console.log('Context menu confirming selection');
+              confirmSelection();
+              return true;
+            } else {
+              console.log('Context menu: No selection to confirm - confirmSelection function or selectionBounds not available');
+              return false;
+            }
+          })();
+        `).then(result => {
+          console.log('Context menu confirmation result:', result);
+        }).catch(error => {
+          console.error('Context menu confirmation error:', error);
+        });
       }
     },
     { type: 'separator' },

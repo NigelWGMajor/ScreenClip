@@ -8,6 +8,7 @@ html, body {
   width: 100%;
   height: 100%;
   box-sizing: border-box;
+  overflow: hidden; /* Disable scroll bars completely */
 }
 
 body {
@@ -29,6 +30,7 @@ body::before {
   border: 2px solid red;
   z-index: 9999;
   border-radius: 0;
+  box-sizing: border-box; /* Ensure border doesn't add to size */
 }
 
 .fill {

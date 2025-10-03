@@ -3,6 +3,12 @@ console.log('Renderer process loaded');
 // Using direct ipcRenderer since contextIsolation is disabled
 const { ipcRenderer } = require('electron');
 
+// Helper function to send debug messages to main process (so they show in terminal)
+function debugLog(message) {
+  console.log(message);
+  ipcRenderer.send('debug-log', message);
+}
+
 // Initial opacity value (15% to match CSS)
 let currentOpacity = 0.15;
 let currentScaleFactor = 1; // Track DPI scale factor
@@ -30,6 +36,34 @@ let trackedWindowPosition = { x: 100, y: 100 }; // Will be initialized on load
 // Debounce timer for auto-crop after scaling
 let autoCropTimer = null;
 
+// Drawing system variables
+let drawingCanvas = null;
+let drawingCtx = null;
+let isDrawing = false;
+let drawingMode = 'arrow'; // Default to arrow mode: 'arrow', 'box', 'rounded-box', 'text'
+let drawingStart = null;
+let drawingCurrent = null;
+let drawingColors = ['red', 'orange', 'yellow', 'green', 'blue', 'grey', 'white', 'black'];
+let colorIndex = 0; // Current color index
+let drawingColor = drawingColors[colorIndex];
+let drawingLineWidth = 2; // Reduced thickness for cleaner look
+let textMode = false;
+let pendingText = null; // For text positioning before entry
+let preventNextContextMenu = false; // Flag to prevent context menu after drawing
+let rightClickStartPos = null; // Track right-click start position for drag detection
+const MIN_DRAG_DISTANCE = 5; // Minimum pixels to consider it a drag vs click
+
+// Add debugging for mode changes
+function setTextMode(value, reason = 'unknown') {
+  console.log(`*** TEXT MODE CHANGE *** from ${textMode} to ${value} - reason: ${reason}`);
+  textMode = value;
+}
+
+function setDrawingMode(value, reason = 'unknown') {
+  console.log(`*** DRAWING MODE CHANGE *** from ${drawingMode} to ${value} - reason: ${reason}`);
+  drawingMode = value;
+}
+
 
 // Set initial fade opacity on .fill when DOM is loaded
 document.addEventListener('DOMContentLoaded', async () => {
@@ -53,6 +87,9 @@ document.addEventListener('DOMContentLoaded', async () => {
   // Set initial cursor (should be context-menu since no image is loaded yet)
   updateCursor();
   console.log('Initial cursor set');
+  
+  // Initialize drawing canvas
+  initializeDrawingCanvas();
 });
 
 // Cursor management for different drag modes
@@ -121,6 +158,35 @@ function getBorderCursor(event) {
   
   return null; // Not near a border
 }
+
+// Initialize drawing canvas
+function initializeDrawingCanvas() {
+  drawingCanvas = document.getElementById('drawingCanvas');
+  if (drawingCanvas) {
+    drawingCtx = drawingCanvas.getContext('2d');
+    resizeDrawingCanvas();
+    debugLog('*** DRAWING CANVAS INITIALIZED ***');
+  } else {
+    debugLog('*** ERROR: Drawing canvas not found! ***');
+  }
+}
+
+// Resize drawing canvas to match window
+function resizeDrawingCanvas() {
+  if (drawingCanvas) {
+    drawingCanvas.width = window.innerWidth;
+    drawingCanvas.height = window.innerHeight;
+    
+    // Set drawing properties
+    drawingCtx.strokeStyle = drawingColor;
+    drawingCtx.lineWidth = drawingLineWidth;
+    drawingCtx.lineCap = 'round';
+    drawingCtx.lineJoin = 'round';
+  }
+}
+
+// Handle window resize for canvas
+window.addEventListener('resize', resizeDrawingCanvas);
 
 
 ipcRenderer.on('toggle-border', () => {
@@ -962,8 +1028,62 @@ document.addEventListener('mousedown', async (event) => {
     // Left-click with modifier keys
     const shiftPressed = event.shiftKey;
     const ctrlPressed = event.ctrlKey;
+    const altPressed = event.altKey;
     
-    if (shiftPressed && ctrlPressed) {
+    // Simplified approach: Only check if we have an image loaded
+    const content = document.querySelector('.content');
+    const backgroundImage = getComputedStyle(content).backgroundImage;
+    const hasImage = backgroundImage && backgroundImage !== 'none';
+    
+    // Handle text mode clicks
+    if (hasImage && textMode && drawingMode === 'text') {
+      console.log(`*** TEXT MODE CLICK DETECTED *** textMode: ${textMode}, drawingMode: ${drawingMode}`);
+      
+      // In text mode, left click sets text position AND immediately opens text input
+      const rect = content.getBoundingClientRect();
+      pendingText = {
+        x: event.clientX - rect.left,
+        y: event.clientY - rect.top
+      };
+      
+      console.log(`*** TEXT POSITION SET *** at (${pendingText.x}, ${pendingText.y}) - Opening text input immediately`);
+      
+      // Store the mouse position to check for drag vs click
+      const textClickStart = { x: event.clientX, y: event.clientY };
+      
+      // Set up a mouseup listener to detect if this was a click (not drag)
+      const handleTextClick = (upEvent) => {
+        const dragDistance = Math.sqrt(
+          Math.pow(upEvent.clientX - textClickStart.x, 2) + 
+          Math.pow(upEvent.clientY - textClickStart.y, 2)
+        );
+        
+        if (dragDistance < 5) { // Small movement = click, not drag
+          console.log(`*** TEXT CLICK CONFIRMED *** - Opening text input (textMode: ${textMode}, drawingMode: ${drawingMode})`);
+          setTimeout(() => {
+            if (pendingText && textMode && drawingMode === 'text') { // Check all conditions
+              enterTextInput();
+            } else {
+              console.log(`*** TEXT INPUT CANCELED *** - Conditions not met: pendingText: ${!!pendingText}, textMode: ${textMode}, drawingMode: ${drawingMode}`);
+            }
+          }, 10);
+        } else {
+          console.log('*** TEXT DRAG DETECTED *** - Not opening text input');
+          pendingText = null; // Cancel text input
+        }
+        
+        // Remove the temporary listener
+        document.removeEventListener('mouseup', handleTextClick);
+      };
+      
+      document.addEventListener('mouseup', handleTextClick);
+      
+      return; // Don't process as drag
+    }
+    
+    if (!shiftPressed && !ctrlPressed && !altPressed) {
+      // No modifiers: Normal window drag (even with image)
+      // This allows simple unmodified drag to move the entire window
       // Both modifiers: Combined drag (move window and image together)
       const backgroundImage = getComputedStyle(content).backgroundImage;
       
@@ -1069,12 +1189,68 @@ document.addEventListener('mousedown', async (event) => {
     }
     // No modifiers: No drag action
   } else if (event.button === 2) {
-    // Right-click: Keep for context menu only, no dragging
-    // (Right-click dragging is now handled by Ctrl+Left-click)
+    // Right-click: Start drawing based on current mode
+    const content = document.querySelector('.content');
+    const backgroundImage = getComputedStyle(content).backgroundImage;
+    
+    if (backgroundImage && backgroundImage !== 'none') {
+      // Record the start position to detect if this becomes a drag
+      rightClickStartPos = { x: event.clientX, y: event.clientY };
+      
+      // Don't start drawing immediately - wait for mousemove to confirm drag
+      // This prevents unwanted artifacts on simple right-clicks
+      
+      return;
+    }
+    // If no image, allow normal context menu (don't prevent default)
   }
 });
 
 document.addEventListener('mousemove', async (event) => {
+  // Check if we should start drawing from a right-click
+  if (rightClickStartPos && !isDrawing) {
+    const dragDistance = Math.sqrt(
+      Math.pow(event.clientX - rightClickStartPos.x, 2) + 
+      Math.pow(event.clientY - rightClickStartPos.y, 2)
+    );
+    
+    // Only start drawing if we've moved enough distance
+    if (dragDistance >= MIN_DRAG_DISTANCE) {
+      console.log(`Starting drawing - drag distance: ${dragDistance}`);
+      
+      if (drawingMode === 'arrow') {
+        startArrowDrawing({ clientX: rightClickStartPos.x, clientY: rightClickStartPos.y });
+      } else if (drawingMode === 'box' || drawingMode === 'rounded-box') {
+        startBoxDrawing({ clientX: rightClickStartPos.x, clientY: rightClickStartPos.y });
+      } else if (drawingMode === 'text') {
+        // For text mode, right-click places text at start position
+        const content = document.querySelector('.content');
+        const rect = content.getBoundingClientRect();
+        pendingText = {
+          x: rightClickStartPos.x - rect.left,
+          y: rightClickStartPos.y - rect.top
+        };
+        console.log(`Text position set at (${pendingText.x}, ${pendingText.y}) - Press Enter to type`);
+      }
+      
+      rightClickStartPos = null; // Clear the start position
+      rightClickDragStarted = true; // Mark that we started a drag
+    }
+  }
+  
+  // Handle drawing mode
+  if (isDrawing && drawingMode === 'arrow') {
+    drawingCurrent = { x: event.clientX, y: event.clientY };
+    // Draw preview line during drag
+    drawArrow(drawingStart.x, drawingStart.y, drawingCurrent.x, drawingCurrent.y, true);
+    return; // Don't process other mouse move logic
+  } else if (isDrawing && (drawingMode === 'box' || drawingMode === 'rounded-box')) {
+    drawingCurrent = { x: event.clientX, y: event.clientY };
+    // Draw preview box during drag
+    drawBox(drawingStart.x, drawingStart.y, drawingCurrent.x, drawingCurrent.y, true);
+    return; // Don't process other mouse move logic
+  }
+  
   if (isDragging && dragInfo) {
     if (isCombinedDrag) {
       // Combined drag: Move both window and image
@@ -1160,6 +1336,64 @@ document.addEventListener('mousemove', async (event) => {
 });
 
 document.addEventListener('mouseup', (event) => {
+  // Clear right-click start position if no drawing was started
+  if (rightClickStartPos && !isDrawing) {
+    rightClickStartPos = null;
+    console.log('Right-click released without drawing - allowing context menu');
+  }
+  
+  // Handle drawing mode
+  if (isDrawing && drawingMode === 'arrow') {
+    // Check if we actually dragged enough to warrant preventing context menu
+    const dragDistance = Math.sqrt(
+      Math.pow(drawingCurrent.x - drawingStart.x, 2) + 
+      Math.pow(drawingCurrent.y - drawingStart.y, 2)
+    );
+    
+    if (dragDistance >= MIN_DRAG_DISTANCE) {
+      // Finalize arrow drawing only if we dragged enough
+      drawArrow(drawingStart.x, drawingStart.y, drawingCurrent.x, drawingCurrent.y, false);
+      rightClickDragStarted = true; // Mark that we just finished drawing
+      console.log('Arrow drawing completed - context menu temporarily disabled');
+    } else {
+      // Too small to be a real drawing - allow context menu and clear canvas
+      drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+      rightClickDragStarted = false;
+    }
+    
+    // Reset drawing state but keep the mode
+    isDrawing = false;
+    drawingCanvas.style.pointerEvents = 'none'; // Disable canvas interaction
+    
+    console.log(`Arrow completed from (${drawingStart.x}, ${drawingStart.y}) to (${drawingCurrent.x}, ${drawingCurrent.y}), distance: ${dragDistance}`);
+    return;
+  } else if (isDrawing && (drawingMode === 'box' || drawingMode === 'rounded-box')) {
+    // Check if we actually dragged enough to warrant preventing context menu
+    const dragDistance = Math.sqrt(
+      Math.pow(drawingCurrent.x - drawingStart.x, 2) + 
+      Math.pow(drawingCurrent.y - drawingStart.y, 2)
+    );
+    
+    if (dragDistance >= MIN_DRAG_DISTANCE) {
+      // Finalize box drawing only if we dragged enough
+      debugLog(`*** FINALIZING BOX DRAWING *** from (${drawingStart.x}, ${drawingStart.y}) to (${drawingCurrent.x}, ${drawingCurrent.y})`);
+      drawBox(drawingStart.x, drawingStart.y, drawingCurrent.x, drawingCurrent.y, false);
+      rightClickDragStarted = true; // Mark that we just finished drawing
+      debugLog('*** BOX DRAWING COMPLETED *** - context menu temporarily disabled');
+    } else {
+      // Too small to be a real drawing - allow context menu and clear canvas
+      drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+      rightClickDragStarted = false;
+    }
+    
+    // Reset drawing state but keep the mode
+    isDrawing = false;
+    drawingCanvas.style.pointerEvents = 'none'; // Disable canvas interaction
+    
+    console.log(`Box completed from (${drawingStart.x}, ${drawingStart.y}) to (${drawingCurrent.x}, ${drawingCurrent.y}), distance: ${dragDistance}`);
+    return;
+  }
+  
   if (isDragging) {
     isDragging = false;
     dragInfo = null;
@@ -1170,6 +1404,12 @@ document.addEventListener('mouseup', (event) => {
     
     // Reset cursor based on current modifier state
     updateCursor(event);
+  }
+  
+  // Reset context menu availability on any left click
+  if (event.button === 0) {
+    rightClickDragStarted = false;
+    console.log('Left click - context menu re-enabled');
   }
 });
 
@@ -1204,17 +1444,37 @@ document.addEventListener('mousedown', (event) => {
   }
 });
 
-// Only prevent context menu if we actually started dragging an image
+// Handle context menu - restore normal functionality with drawing mode options
 document.addEventListener('contextmenu', (event) => {
-  if (rightClickDragStarted) {
-    event.preventDefault(); // Only prevent if we actually dragged
+  // Always allow context menu - let the user decide when they want it
+  console.log('Context menu requested');
+  
+  // Check if we have an image loaded
+  const content = document.querySelector('.content');
+  const backgroundImage = getComputedStyle(content).backgroundImage;
+  
+  if (backgroundImage && backgroundImage !== 'none') {
+    // If we have an image, check if we just finished drawing
+    if (rightClickDragStarted) {
+      // Prevent menu if we just finished dragging/drawing
+      event.preventDefault();
+      console.log('Preventing context menu - just finished drawing');
+      rightClickDragStarted = false; // Reset immediately
+    } else {
+      // Allow normal context menu - we'll add drawing options to the main context menu
+      console.log('Allowing context menu with drawing options');
+    }
+  } else {
+    console.log('No image loaded, allowing normal context menu');
   }
-  // Otherwise, allow normal context menu
 });
 
 // COMPREHENSIVE KEYBOARD HANDLER - All shortcuts in one place to avoid conflicts
 // CRITICAL: This is the ONLY main keyboard handler - do not add duplicate handlers!
+// Use capture phase to ensure we get events before other handlers
 document.addEventListener('keydown', async (event) => {
+  debugLog(`*** KEYDOWN EVENT *** Key: ${event.key}, Ctrl: ${event.ctrlKey}, Alt: ${event.altKey}, Shift: ${event.shiftKey}`);
+  
   // Handle Ctrl+C (copy current view to clipboard)
   if (event.ctrlKey && event.key.toLowerCase() === 'c') {
     event.preventDefault();
@@ -1337,6 +1597,9 @@ document.addEventListener('keydown', async (event) => {
         }
         
         console.log('Image pasted and positioned successfully');
+        
+        // Initialize drawing system with default settings
+        updateBorderColor();
         
       } else {
         console.log('No image found in clipboard');
@@ -1589,7 +1852,136 @@ document.addEventListener('keydown', async (event) => {
       console.error('Error showing help dialog:', error);
     }
   }
-});
+  
+  // Handle C (cycle colors) - only when NOT typing in text input
+  else if (event.key.toLowerCase() === 'c' && !event.ctrlKey && !event.altKey && !event.shiftKey) {
+    // Check if we're currently typing in a text input - if so, don't intercept keys
+    const activeElement = document.activeElement;
+    if (activeElement && (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA')) {
+      // User is typing in text input - let the keys pass through
+      return;
+    }
+    
+    event.preventDefault();
+    event.stopPropagation();
+    const content = document.querySelector('.content');
+    const backgroundImage = getComputedStyle(content).backgroundImage;
+    
+    if (backgroundImage && backgroundImage !== 'none') {
+      colorIndex = (colorIndex + 1) % drawingColors.length;
+      drawingColor = drawingColors[colorIndex];
+      updateBorderColor();
+      console.log(`*** COLOR CHANGED *** to: ${drawingColor}`);
+    }
+  }
+  
+  // Handle mode switching shortcuts: T, B, R, A (only when image is loaded AND not typing in text input)
+  else if (!event.ctrlKey && !event.altKey && !event.shiftKey && event.key !== 'Enter') {
+    // Check if we're currently typing in a text input - if so, don't intercept keys
+    const activeElement = document.activeElement;
+    if (activeElement && (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA')) {
+      // User is typing in text input - let the keys pass through
+      return;
+    }
+    
+    const content = document.querySelector('.content');
+    const backgroundImage = getComputedStyle(content).backgroundImage;
+    
+    if (backgroundImage && backgroundImage !== 'none') {
+      const key = event.key.toLowerCase();
+      
+      if (key === 't') {
+        // Text mode
+        event.preventDefault();
+        event.stopPropagation();
+        setTextMode(true, 'T key pressed');
+        setDrawingMode('text', 'T key pressed');
+        document.body.style.cursor = 'text';
+        updateBorderColor();
+        debugLog('*** TEXT MODE ACTIVATED *** via T key - Click to place text');
+      } else if (key === 'b') {
+        // Box mode
+        event.preventDefault();
+        event.stopPropagation();
+        setTextMode(false, 'B key pressed');
+        setDrawingMode('box', 'B key pressed');
+        document.body.style.cursor = 'crosshair';
+        updateBorderColor();
+        debugLog('*** BOX MODE ACTIVATED *** via B key');
+      } else if (key === 'r') {
+        // Rounded box mode
+        event.preventDefault();
+        event.stopPropagation();
+        setTextMode(false, 'R key pressed');
+        setDrawingMode('rounded-box', 'R key pressed');
+        document.body.style.cursor = 'crosshair';
+        updateBorderColor();
+        console.log('*** ROUNDED BOX MODE ACTIVATED *** via R key');
+      } else if (key === 'a') {
+        // Arrow mode
+        event.preventDefault();
+        event.stopPropagation();
+        setTextMode(false, 'A key pressed');
+        setDrawingMode('arrow', 'A key pressed');
+        document.body.style.cursor = 'crosshair';
+        updateBorderColor();
+        console.log('*** ARROW MODE ACTIVATED *** via A key');
+      }
+    }
+  }
+  
+  // Handle Enter (commit drawing or enter text) - ONLY when image is loaded
+  else if (event.key === 'Enter' && !event.ctrlKey && !event.altKey && !event.shiftKey) {
+    const content = document.querySelector('.content');
+    const backgroundImage = getComputedStyle(content).backgroundImage;
+    
+    debugLog(`*** ENTER KEY PRESSED *** textMode: ${textMode}, pendingText: ${!!pendingText}, drawingMode: ${drawingMode}`);
+    debugLog(`*** BACKGROUND IMAGE CHECK *** backgroundImage: ${backgroundImage}`);
+    
+    // Only handle Enter for drawing if we have an image loaded
+    if (backgroundImage && backgroundImage !== 'none') {
+      debugLog('*** IMAGE IS LOADED *** - processing Enter key');
+      event.preventDefault();
+      event.stopPropagation();
+      
+      if (textMode && pendingText) {
+        // This case should not happen anymore since clicking immediately opens text input
+        debugLog('*** REDUNDANT ENTER IN TEXT MODE *** - Text input should have opened automatically');
+      } else if (textMode && !pendingText) {
+        // Check if we have text on canvas that needs committing
+        debugLog('*** TEXT MODE BRANCH ***');
+        const hasTextOnCanvas = checkIfCanvasHasContent();
+        if (hasTextOnCanvas) {
+          debugLog('*** COMMITTING ALL TEXT TO IMAGE ***');
+          commitDrawingToImage();
+          // STAY in text mode after committing - user can continue adding text
+          // setTextMode(false, 'committing all text to image');  // REMOVED
+          // setDrawingMode('arrow', 'exiting text mode after commit');  // REMOVED
+          document.body.style.cursor = 'text'; // Keep text cursor
+          updateBorderColor();
+          debugLog('*** TEXT COMMITTED *** - Still in text mode, click to add more text');
+        } else {
+          debugLog('*** TEXT MODE ACTIVE *** - Click to place text, Enter to commit when done');
+        }
+      } else {
+        // Check if we have any drawing content (arrows, boxes, etc.) that needs committing
+        debugLog('*** NON-TEXT MODE BRANCH ***');
+        debugLog(`*** CHECKING FOR DRAWING CONTENT *** drawingMode: ${drawingMode}, isDrawing: ${isDrawing}`);
+        const hasDrawingOnCanvas = checkIfCanvasHasContent();
+        debugLog(`*** CANVAS CONTENT CHECK *** hasContent: ${hasDrawingOnCanvas}`);
+        if (hasDrawingOnCanvas) {
+          debugLog('*** COMMITTING DRAWING TO IMAGE ***');
+          commitDrawingToImage();
+        } else {
+          debugLog('*** NO CONTENT TO COMMIT *** - Draw something first');
+        }
+      }
+    } else {
+      debugLog('*** NO IMAGE LOADED *** - Enter key ignored');
+    }
+    // If no image loaded, let Enter key pass through for normal capture functionality
+  }
+}, false); // Use normal phase instead of capture to avoid interfering with system functions
 
 // Drag and drop support for image files
 document.addEventListener('DOMContentLoaded', () => {
@@ -2342,7 +2734,445 @@ ipcRenderer.on('load-selected-area', async (event, selectionData) => {
     
     img.src = selectionData.screenshot;
     
+    // Initialize drawing system after image is loaded
+    setTimeout(() => {
+      updateBorderColor();
+      console.log('Drawing system initialized with default settings');
+    }, 100);
+    
   } catch (error) {
     console.error('Error loading selected area:', error);
   }
 });
+
+// IPC handlers for drawing mode switching and committing
+ipcRenderer.on('set-drawing-mode', (event, mode) => {
+  const content = document.querySelector('.content');
+  const backgroundImage = getComputedStyle(content).backgroundImage;
+  
+  console.log(`*** SET DRAWING MODE *** to: ${mode}`);
+  
+  if (backgroundImage && backgroundImage !== 'none') {
+    setDrawingMode(mode, 'IPC set-drawing-mode');
+    if (mode === 'text') {
+      setTextMode(true, 'IPC set-drawing-mode to text');
+      document.body.style.cursor = 'text';
+      console.log('*** TEXT MODE ACTIVATED *** - Click anywhere to place and type text');
+      console.log('*** TEXT WORKFLOW *** Click → Type → Enter → Repeat... → Final Enter to commit all');
+      console.log(`Variables set: textMode=${textMode}, drawingMode=${drawingMode}`);
+    } else {
+      setTextMode(false, `IPC set-drawing-mode to ${mode}`);
+      document.body.style.cursor = 'default';
+      console.log(`*** ${mode.toUpperCase()} MODE ACTIVATED ***`);
+    }
+    updateBorderColor();
+    console.log(`Drawing mode changed to: ${mode}`);
+  } else {
+    console.log('*** NO IMAGE LOADED *** - Cannot set drawing mode');
+  }
+});
+
+ipcRenderer.on('commit-drawing', () => {
+  commitDrawingToImage();
+});
+
+// ===== DRAWING SYSTEM =====
+
+// Start arrow drawing
+function startArrowDrawing(event) {
+  isDrawing = true;
+  // DON'T override drawingMode - keep the current mode
+  console.log(`*** STARTING ARROW DRAWING *** in mode: ${drawingMode}`);
+  drawingStart = { x: event.clientX, y: event.clientY };
+  drawingCurrent = { x: event.clientX, y: event.clientY };
+  
+  // Enable pointer events on canvas for drawing
+  drawingCanvas.style.pointerEvents = 'auto';
+  
+  console.log(`Arrow drawing started at (${drawingStart.x}, ${drawingStart.y})`);
+}
+
+// Start text mode (Alt + click)
+function startTextMode(event) {
+  console.log(`*** TEXT MODE CALLED *** - current mode: ${drawingMode}`);
+  // DON'T override drawingMode - keep the current mode
+  setDrawingMode('text');
+  console.log(`Text mode activated at (${event.clientX}, ${event.clientY})`);
+  // TODO: Implement text placement
+}
+
+// Draw arrow from start to end point
+function drawArrow(startX, startY, endX, endY, preview = false) {
+  if (!drawingCtx) return;
+  
+  // Clear canvas if this is a preview
+  if (preview) {
+    drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+  }
+  
+  // Set drawing style using current color
+  drawingCtx.strokeStyle = drawingColor;
+  drawingCtx.fillStyle = drawingColor;
+  drawingCtx.lineWidth = drawingLineWidth;
+  
+  // Draw line
+  drawingCtx.beginPath();
+  drawingCtx.moveTo(startX, startY);
+  drawingCtx.lineTo(endX, endY);
+  drawingCtx.stroke();
+  
+  // Draw arrowhead at start point (where user first clicked)
+  const angle = Math.atan2(startY - endY, startX - endX);
+  const headlen = 20; // Length of arrowhead
+  
+  drawingCtx.beginPath();
+  drawingCtx.moveTo(startX, startY);
+  drawingCtx.lineTo(
+    startX - headlen * Math.cos(angle - Math.PI / 6),
+    startY - headlen * Math.sin(angle - Math.PI / 6)
+  );
+  drawingCtx.moveTo(startX, startY);
+  drawingCtx.lineTo(
+    startX - headlen * Math.cos(angle + Math.PI / 6),
+    startY - headlen * Math.sin(angle + Math.PI / 6)
+  );
+  drawingCtx.stroke();
+}
+
+// Start box drawing (right-click)
+function startBoxDrawing(event) {
+  isDrawing = true;
+  // DON'T override drawingMode - keep the current mode (box or rounded-box)
+  console.log(`*** STARTING BOX DRAWING *** in mode: ${drawingMode}`);
+  drawingStart = { x: event.clientX, y: event.clientY };
+  drawingCurrent = { x: event.clientX, y: event.clientY };
+  
+  // Enable pointer events on canvas for drawing
+  drawingCanvas.style.pointerEvents = 'auto';
+  
+  console.log(`Box drawing started at (${drawingStart.x}, ${drawingStart.y}) in mode: ${drawingMode}`);
+}
+
+// Draw box from start to end point
+function drawBox(startX, startY, endX, endY, preview = false) {
+  if (!drawingCtx) return;
+  
+  // Clear canvas if this is a preview
+  if (preview) {
+    drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+  }
+  
+  // Set drawing style using current color
+  drawingCtx.strokeStyle = drawingColor;
+  drawingCtx.lineWidth = drawingLineWidth;
+  
+  // Calculate rectangle dimensions
+  const left = Math.min(startX, endX);
+  const top = Math.min(startY, endY);
+  const width = Math.abs(endX - startX);
+  const height = Math.abs(endY - startY);
+  
+  console.log(`Drawing ${drawingMode} from (${startX}, ${startY}) to (${endX}, ${endY})`);
+  console.log(`Rectangle bounds: left=${left}, top=${top}, width=${width}, height=${height}`);
+  
+  if (drawingMode === 'rounded-box') {
+    // FORCED rounded rectangle drawing with aggressive debugging
+    const radius = Math.max(15, Math.min(40, width / 4, height / 4)); // Ensure visible radius
+    console.log(`*** ROUNDED BOX MODE *** radius: ${radius}, width: ${width}, height: ${height}`);
+    console.log(`Drawing mode confirmed as: ${drawingMode}`);
+    
+    // Always use manual method for reliability
+    console.log('Using manual rounded rectangle method');
+    drawRoundedRectManual(drawingCtx, left, top, width, height, radius);
+  } else {
+    // Draw regular rectangle
+    console.log('Drawing regular box');
+    drawingCtx.strokeRect(left, top, width, height);
+  }
+}
+
+// Helper function to draw rounded rectangle manually
+function drawRoundedRectManual(ctx, x, y, width, height, radius) {
+  console.log(`*** DRAWING ROUNDED RECT *** x=${x}, y=${y}, w=${width}, h=${height}, r=${radius}`);
+  
+  ctx.beginPath();
+  
+  // Move to starting point (top edge, right of top-left corner)
+  ctx.moveTo(x + radius, y);
+  console.log(`Starting at: ${x + radius}, ${y}`);
+  
+  // Top edge
+  ctx.lineTo(x + width - radius, y);
+  // Top-right corner
+  ctx.quadraticCurveTo(x + width, y, x + width, y + radius);
+  
+  // Right edge
+  ctx.lineTo(x + width, y + height - radius);
+  // Bottom-right corner
+  ctx.quadraticCurveTo(x + width, y + height, x + width - radius, y + height);
+  
+  // Bottom edge
+  ctx.lineTo(x + radius, y + height);
+  // Bottom-left corner
+  ctx.quadraticCurveTo(x, y + height, x, y + height - radius);
+  
+  // Left edge
+  ctx.lineTo(x, y + radius);
+  // Top-left corner
+  ctx.quadraticCurveTo(x, y, x + radius, y);
+  
+  ctx.closePath();
+  
+  // Make sure stroke style is set
+  ctx.lineWidth = 3; // Thicker line for visibility
+  ctx.stroke();
+  
+  console.log('*** ROUNDED RECT DRAWING COMPLETED ***');
+}
+
+// Helper function to check if drawing canvas has content
+function checkIfCanvasHasContent() {
+  debugLog(`*** CHECKING CANVAS CONTENT *** canvas: ${!!drawingCanvas}, ctx: ${!!drawingCtx}`);
+  if (!drawingCanvas || !drawingCtx) {
+    debugLog('*** NO CANVAS OR CONTEXT ***');
+    return false;
+  }
+  
+  debugLog(`*** CANVAS SIZE *** ${drawingCanvas.width}x${drawingCanvas.height}`);
+  
+  // Get image data from the canvas
+  const imageData = drawingCtx.getImageData(0, 0, drawingCanvas.width, drawingCanvas.height);
+  const data = imageData.data;
+  
+  debugLog(`*** IMAGE DATA LENGTH *** ${data.length} pixels`);
+  
+  // Check if any pixel has alpha > 0 (not transparent)
+  let nonTransparentPixels = 0;
+  for (let i = 3; i < data.length; i += 4) {
+    if (data[i] > 0) {
+      nonTransparentPixels++;
+    }
+  }
+  
+  debugLog(`*** NON-TRANSPARENT PIXELS *** ${nonTransparentPixels}`);
+  return nonTransparentPixels > 0;
+}
+
+// Helper function to update border color to reflect current drawing color
+function updateBorderColor() {
+  // The border is controlled by CSS ::before pseudo-element, so we need to update CSS
+  const existingStyle = document.getElementById('dynamic-border-style');
+  if (existingStyle) {
+    existingStyle.remove();
+  }
+  
+  // Create new style element to override the border color
+  const style = document.createElement('style');
+  style.id = 'dynamic-border-style';
+  style.textContent = `
+    body::before {
+      border-color: ${drawingColor} !important;
+    }
+  `;
+  document.head.appendChild(style);
+  
+  console.log(`*** BORDER COLOR UPDATED *** to: ${drawingColor} (mode: ${drawingMode})`);
+}
+
+// Helper function to accept current drawing and make it permanent
+function acceptCurrentDrawing() {
+  // Clear any preview drawings and make current drawing permanent
+  if (drawingCanvas && drawingCtx) {
+    // The drawing is already on the canvas, so just clear the preview state
+    isDrawing = false;
+    drawingStart = null;
+    drawingCurrent = null;
+    pendingText = null;
+    console.log('Current drawing accepted and made permanent');
+  }
+}
+
+// Helper function to enter text input mode
+function enterTextInput() {
+  console.log(`*** ENTER TEXT INPUT *** textMode: ${textMode}, drawingMode: ${drawingMode}, pendingText: ${!!pendingText}`);
+  
+  if (pendingText) {
+    // Clear any existing canvas content first
+    if (drawingCtx) {
+      // Don't clear the entire canvas, just ensure clean state for text input
+    }
+    
+    // Create a text input overlay at the pending position
+    const textInput = document.createElement('input');
+    textInput.type = 'text';
+    textInput.style.position = 'absolute';
+    textInput.style.left = pendingText.x + 'px';
+    textInput.style.top = (pendingText.y - 20) + 'px'; // Position above the cursor
+    textInput.style.fontSize = '16px'; // Fixed size, not DPI scaled
+    textInput.style.color = drawingColor;
+    textInput.style.backgroundColor = 'rgba(255, 255, 255, 0.8)';
+    textInput.style.border = '1px solid ' + drawingColor;
+    textInput.style.borderRadius = '3px';
+    textInput.style.padding = '2px 5px';
+    textInput.style.zIndex = '1000';
+    textInput.style.minWidth = '100px';
+    
+    document.body.appendChild(textInput);
+    textInput.focus();
+    
+    // Function to clean up the text input
+    const cleanupTextInput = () => {
+      if (document.body.contains(textInput)) {
+        document.body.removeChild(textInput);
+      }
+      pendingText = null;
+      document.body.style.cursor = 'text';
+      console.log('Text input cleaned up');
+    };
+    
+    // Handle blur (clicking outside) - clean up abandoned text input
+    textInput.addEventListener('blur', () => {
+      // Small delay to allow for Enter key processing
+      setTimeout(() => {
+        if (document.body.contains(textInput)) {
+          console.log('Text input abandoned - cleaning up');
+          cleanupTextInput();
+        }
+      }, 100);
+    });
+    
+    textInput.addEventListener('keydown', (event) => {
+      if (event.key === 'Enter') {
+        // Place the text on the canvas (not committed yet)
+        const text = textInput.value;
+        if (text.trim()) {
+          drawTextOnCanvas(pendingText.x, pendingText.y, text);
+        }
+        cleanupTextInput();
+        // KEEP text mode active for more text entry
+        console.log(`*** TEXT PLACED *** textMode: ${textMode}, drawingMode: ${drawingMode} - staying in text mode`);
+        console.log('Text placed on canvas - click elsewhere for more text, or press Enter to commit all text');
+      } else if (event.key === 'Escape') {
+        // Cancel current text input but stay in text mode
+        cleanupTextInput();
+        // KEEP text mode active - just cancel this specific text entry
+        // textMode stays true, drawingMode stays 'text'  
+        console.log('Text input canceled - still in text mode, click elsewhere for more text');
+      }
+    });
+  }
+}
+
+// Helper function to draw text on canvas
+function drawTextOnCanvas(x, y, text) {
+  console.log(`*** DRAWING TEXT *** "${text}" at (${x}, ${y})`);
+  
+  if (drawingCtx) {
+    // Use a base font size that doesn't get scaled by DPI
+    const baseFontSize = 18;
+    drawingCtx.font = `bold ${baseFontSize}px Arial`;
+    
+    // Simple text drawing - no background, no outline, no shadows
+    drawingCtx.fillStyle = drawingColor;
+    drawingCtx.fillText(text, x, y);
+    
+    console.log(`*** TEXT DRAWING COMPLETED *** in color ${drawingColor}`);
+  } else {
+    console.error('*** TEXT DRAWING FAILED *** - no drawing context');
+  }
+}
+
+// Function to commit current drawing to the background image
+function commitDrawingToImage() {
+  const content = document.querySelector('.content');
+  const backgroundImage = getComputedStyle(content).backgroundImage;
+  
+  console.log('Commit function called, backgroundImage:', backgroundImage);
+  console.log('drawingCanvas exists:', !!drawingCanvas);
+  
+  if (backgroundImage && backgroundImage !== 'none' && drawingCanvas) {
+    try {
+      // Get the current background image
+      const img = new Image();
+      img.onload = function() {
+        console.log('Original image loaded for commit, size:', img.width, 'x', img.height);
+        
+        // Create a new canvas using the ORIGINAL image dimensions (not display size)
+        const combinedCanvas = document.createElement('canvas');
+        const combinedCtx = combinedCanvas.getContext('2d');
+        
+        // Set canvas size to match the original image dimensions
+        combinedCanvas.width = img.width;
+        combinedCanvas.height = img.height;
+        
+        // Draw the original background image at full resolution
+        combinedCtx.drawImage(img, 0, 0);
+        
+        // Get the display dimensions and position of the background
+        const backgroundSize = getComputedStyle(content).backgroundSize;
+        const backgroundPosition = getComputedStyle(content).backgroundPosition;
+        
+        const sizeParts = backgroundSize.split(' ');
+        const displayWidth = parseFloat(sizeParts[0]);
+        const displayHeight = parseFloat(sizeParts[1]);
+        
+        const positionParts = backgroundPosition.split(' ');
+        const offsetX = parseFloat(positionParts[0]) || 0;
+        const offsetY = parseFloat(positionParts[1]) || 0;
+        
+        // Calculate scaling factors from display size to original image size
+        // Also account for current image scale
+        const scaleX = img.width / displayWidth;
+        const scaleY = img.height / displayHeight;
+        
+        console.log('Display size:', displayWidth, 'x', displayHeight);
+        console.log('Display position:', offsetX, 'x', offsetY);
+        console.log('Original size:', img.width, 'x', img.height);
+        console.log('Current image scale:', currentImageScale);
+        console.log('Scaling factors - X:', scaleX, 'Y:', scaleY);
+        
+        // Apply transformations to properly place the drawing overlay
+        combinedCtx.save();
+        
+        // First scale to match the original image resolution
+        combinedCtx.scale(scaleX, scaleY);
+        
+        // Then translate to account for background positioning offset
+        combinedCtx.translate(-offsetX, -offsetY);
+        
+        // Draw the overlay canvas
+        combinedCtx.drawImage(drawingCanvas, 0, 0);
+        
+        combinedCtx.restore();
+        
+        // Convert to data URL and update background
+        const newDataUrl = combinedCanvas.toDataURL('image/png');
+        content.style.backgroundImage = `url(${newDataUrl})`;
+        
+        // Clear the drawing canvas
+        drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+        
+        console.log('Drawing committed to image successfully with proper scaling and offset');
+      };
+      
+      img.onerror = function(error) {
+        console.error('Error loading image for commit:', error);
+      };
+      
+      // Extract the URL from the CSS background-image property
+      const urlMatch = backgroundImage.match(/url\(['"]?([^'")]+)['"]?\)/);
+      if (urlMatch) {
+        console.log('Extracted image URL:', urlMatch[1]);
+        img.src = urlMatch[1];
+      } else {
+        console.error('Could not extract image URL from background-image');
+      }
+    } catch (error) {
+      console.error('Error committing drawing to image:', error);
+    }
+  } else {
+    console.log('Cannot commit - no image or drawing canvas available');
+    console.log('  backgroundImage:', backgroundImage);
+    console.log('  drawingCanvas:', !!drawingCanvas);
+  }
+}
