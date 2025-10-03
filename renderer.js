@@ -1935,15 +1935,15 @@ document.addEventListener('keydown', async (event) => {
         document.body.style.cursor = 'text';
         updateBorderColor();
         debugLog('*** TEXT MODE ACTIVATED *** via T key - Click to place text');
-      } else if (key === 'b') {
-        // Box mode
+      } else if (key === 's') {
+        // Sharp Box mode (changed from B to S key)
         event.preventDefault();
         event.stopPropagation();
-        setTextMode(false, 'B key pressed');
-        setDrawingMode('box', 'B key pressed');
+        setTextMode(false, 'S key pressed');
+        setDrawingMode('box', 'S key pressed');
         document.body.style.cursor = 'crosshair';
         updateBorderColor();
-        debugLog('*** BOX MODE ACTIVATED *** via B key');
+        debugLog('*** SHARP BOX MODE ACTIVATED *** via S key');
       } else if (key === 'r') {
         // Rounded box mode
         event.preventDefault();
@@ -3073,31 +3073,28 @@ function sampleBackgroundColor(x, y) {
       const dataUrlMatch = backgroundImage.match(/url\(["']?(.*?)["']?\)/);
       if (dataUrlMatch && dataUrlMatch[1]) {
         const dataUrl = dataUrlMatch[1];
+        console.log(`Found background image data URL, length: ${dataUrl.length}`);
         
-        // Use the pre-loaded sampling canvas if available
-        if (window.samplingCanvas && window.samplingCtx) {
-          console.log(`Using existing sampling canvas: ${window.samplingCanvas.width}x${window.samplingCanvas.height}`);
-          return sampleFromCanvas(window.samplingCanvas, window.samplingCtx, x, y, content);
+        // Create a fresh canvas for immediate pixel sampling
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d');
+        const img = new Image();
+        
+        // Set up the image
+        img.src = dataUrl;
+        
+        // For data URLs, the image loads synchronously
+        if (img.complete && img.width > 0) {
+          canvas.width = img.width;
+          canvas.height = img.height;
+          ctx.drawImage(img, 0, 0);
+          console.log(`Canvas ready: ${img.width}x${img.height}`);
+          
+          // Sample the pixel directly
+          return samplePixelFromCanvas(canvas, ctx, x, y, content);
         } else {
-          // Create and load canvas synchronously for this operation
-          console.log('Creating fresh sampling canvas for immediate use');
-          const canvas = document.createElement('canvas');
-          const ctx = canvas.getContext('2d');
-          const img = new Image();
-          
-          // Try to load synchronously (works for data URLs)
-          img.src = dataUrl;
-          
-          if (img.complete || img.width > 0) {
-            canvas.width = img.width;
-            canvas.height = img.height;
-            ctx.drawImage(img, 0, 0);
-            console.log(`Fresh canvas created: ${img.width}x${img.height}`);
-            return sampleFromCanvas(canvas, ctx, x, y, content);
-          } else {
-            console.log('Image not immediately loadable, using default');
-            return '#FFFFFF';
-          }
+          console.log('Image not ready, using white fallback');
+          return '#FFFFFF';
         }
       }
     }
@@ -3110,30 +3107,49 @@ function sampleBackgroundColor(x, y) {
   }
 }
 
-// Helper function to sample from a canvas
-function sampleFromCanvas(canvas, ctx, x, y, content) {
+// Helper function to sample from a canvas - simplified coordinate transformation
+function samplePixelFromCanvas(canvas, ctx, x, y, content) {
   try {
-    // Get content rectangle for coordinate transformation
+    // Get content properties for coordinate transformation
     const contentRect = content.getBoundingClientRect();
-    console.log(`Content area: ${contentRect.width}x${contentRect.height}`);
+    const style = getComputedStyle(content);
+    const backgroundSize = style.backgroundSize;
+    const backgroundPosition = style.backgroundPosition;
+    
+    console.log(`Content rect: ${contentRect.width}x${contentRect.height}`);
     console.log(`Canvas size: ${canvas.width}x${canvas.height}`);
+    console.log(`Background size: ${backgroundSize}`);
+    console.log(`Background position: ${backgroundPosition}`);
     
-    // Simple direct scaling - assume image fills the entire content area
-    // This works for most screenshot scenarios where background-size is cover
-    const scaleX = canvas.width / contentRect.width;
-    const scaleY = canvas.height / contentRect.height;
+    // Parse background size (e.g., "1920px 1080px")
+    const sizeParts = backgroundSize.split(' ');
+    const bgWidth = parseFloat(sizeParts[0]);
+    const bgHeight = parseFloat(sizeParts[1]) || bgWidth;
     
-    console.log(`Direct scale factors: X=${scaleX.toFixed(3)}, Y=${scaleY.toFixed(3)}`);
+    // Parse background position (e.g., "0px 0px")  
+    const posParts = backgroundPosition.split(' ');
+    const bgPosX = parseFloat(posParts[0]) || 0;
+    const bgPosY = parseFloat(posParts[1]) || 0;
     
-    // Transform click coordinates directly to canvas coordinates
-    const canvasX = Math.floor(x * scaleX);
-    const canvasY = Math.floor(y * scaleY);
+    console.log(`Parsed background: ${bgWidth}x${bgHeight} at (${bgPosX}, ${bgPosY})`);
+    
+    // Transform mouse coordinates to image coordinates
+    // Account for background position offset
+    const imageX = x - bgPosX;
+    const imageY = y - bgPosY;
+    
+    // Scale from displayed size to actual canvas size
+    const scaleX = canvas.width / bgWidth;
+    const scaleY = canvas.height / bgHeight;
+    
+    const canvasX = Math.floor(imageX * scaleX);
+    const canvasY = Math.floor(imageY * scaleY);
     
     // Clamp to canvas bounds
     const clampedX = Math.max(0, Math.min(canvasX, canvas.width - 1));
     const clampedY = Math.max(0, Math.min(canvasY, canvas.height - 1));
     
-    console.log(`Direct transform: click(${x}, ${y}) -> canvas(${clampedX}, ${clampedY})`);
+    console.log(`Transform: mouse(${x}, ${y}) -> image(${imageX}, ${imageY}) -> canvas(${clampedX}, ${clampedY})`);
     
     // Sample the pixel
     const imageData = ctx.getImageData(clampedX, clampedY, 1, 1);
@@ -3143,7 +3159,7 @@ function sampleFromCanvas(canvas, ctx, x, y, content) {
     console.log(`*** SAMPLED COLOR: ${color} *** RGBA: (${data[0]}, ${data[1]}, ${data[2]}, ${data[3]})`);
     return color;
   } catch (error) {
-    console.error('Error sampling from canvas:', error);
+    console.error('Error sampling pixel from canvas:', error);
     return '#FFFFFF';
   }
 }
