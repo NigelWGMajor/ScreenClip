@@ -67,6 +67,33 @@ function setDrawingMode(value, reason = 'unknown') {
   drawingMode = value;
 }
 
+// Unified exit from text mode (matches original inside-text-input Escape behavior)
+function exitTextModeStandard(reason = 'Exit text mode') {
+  setTextMode(false, reason);
+  setDrawingMode('arrow', reason);
+  pendingText = null; // Cancel any pending placement
+  document.body.style.cursor = 'crosshair';
+  updateBorderColor();
+  // Ensure drawing canvas doesn't intercept drag initiation after exiting text mode
+  if (drawingCanvas) {
+    drawingCanvas.style.pointerEvents = 'none';
+  }
+  // Recalculate cursor based on current modifier keys (in case user is holding Ctrl/Shift)
+  try { updateCursor(); } catch (_) {}
+  console.log('*** TEXT MODE EXITED (STANDARD) *** - Returned to arrow mode');
+}
+
+// Fallback capture-phase Escape handler: guarantees exit even if main keydown chain misses it
+document.addEventListener('keydown', (ev) => {
+  if (ev.key === 'Escape' && !ev.ctrlKey && !ev.altKey && !ev.shiftKey) {
+    if (textMode) {
+      debugLog('*** ESCAPE (FALLBACK CAPTURE) *** Forcing text mode exit');
+      exitTextModeStandard('Escape fallback (capture)');
+      // Do NOT prevent default so main handler can still log; state already flipped
+    }
+  }
+}, true); // capture phase
+
 
 // Set initial fade opacity on .fill when DOM is loaded
 document.addEventListener('DOMContentLoaded', async () => {
@@ -1052,6 +1079,15 @@ let isCombinedDrag = false; // Track if both window and image should move
 let imageOffset = { x: 0, y: 0 }; // Track image position offset
 let rightClickDragStarted = false; // Track if right-click actually started a drag
 
+// Keep drawing overlay (and any future overlays) aligned with the background image when it pans
+function updateOverlayTransforms() {
+  if (drawingCanvas) {
+    // Translate overlay by same offset as backgroundPosition so annotations remain anchored
+    drawingCanvas.style.transform = `translate(${imageOffset.x}px, ${imageOffset.y}px)`;
+    drawingCanvas.style.transformOrigin = 'top left';
+  }
+}
+
 // Add keyboard event listeners for modifier key changes
 document.addEventListener('keydown', updateCursor);
 document.addEventListener('keyup', updateCursor);
@@ -1357,6 +1393,7 @@ document.addEventListener('mousemove', async (event) => {
         imageOffset.y = dragInfo.initialOffsetY + deltaY;
         
         content.style.backgroundPosition = `${imageOffset.x}px ${imageOffset.y}px`;
+        updateOverlayTransforms();
         
         console.log(`Image offset: ${imageOffset.x}, ${imageOffset.y}`);
       }
@@ -1387,6 +1424,7 @@ document.addEventListener('mousemove', async (event) => {
         imageOffset.y = dragInfo.initialOffsetY - totalWindowMoveY;
         
         content.style.backgroundPosition = `${imageOffset.x}px ${imageOffset.y}px`;
+        updateOverlayTransforms();
         
         console.log(`Window moved total: (${totalWindowMoveX}, ${totalWindowMoveY}), Image offset: (${imageOffset.x}, ${imageOffset.y})`);
         
@@ -2152,29 +2190,21 @@ document.addEventListener('keydown', async (event) => {
     const backgroundImage = getComputedStyle(content).backgroundImage;
 
     if (backgroundImage && backgroundImage !== 'none') {
-      const activeElement = document.activeElement;
-
-      // Case 1: An input is active → let its own handler cancel (it keeps textMode on first Escape)
-      if (activeElement && (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA')) {
-        return; // Input's own key handler manages cleanup
-      }
-
-      // Case 2: No active input & we are still in text mode → exit text mode WITHOUT discarding placed text
-      if (textMode) {
-        event.preventDefault();
-        event.stopPropagation();
-        const hadUncommittedContent = checkIfCanvasHasContent();
-        debugLog(`*** ESCAPE KEY PRESSED *** - Exiting text mode (uncommittedContent=${hadUncommittedContent})`);
-
-        // Do NOT clear canvas here; keep any placed (but uncommitted) text so user can still commit later with Enter
-        // This enables workflow: T → type → Enter (place) → Escape (return to normal) → Enter (commit) if desired
-
-        setTextMode(false, 'Escape key pressed - leaving text mode');
-        setDrawingMode('arrow', 'Escape key pressed - returning to arrow mode');
-        document.body.style.cursor = 'crosshair'; // Arrow drawing cursor
-        updateBorderColor();
-        console.log('*** TEXT MODE EXITED *** - Existing uncommitted text retained; normal mouse operations restored');
-      }
+        const activeElement = document.activeElement;
+        // If an input is focused, let its own handler handle Escape (prevents double-processing)
+        if (activeElement && (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA')) {
+          return;
+        }
+        if (textMode) {
+          debugLog('*** ESCAPE KEY PRESSED *** - Exiting text mode (no active input)');
+          exitTextModeStandard('Escape key (no active input)');
+          // Force state (belt-and-suspenders) in case any async code reverts it
+          textMode = false;
+          drawingMode = 'arrow';
+          console.log(`*** ESCAPE POST-EXIT STATE *** textMode=${textMode}, drawingMode=${drawingMode}`);
+          event.preventDefault();
+          event.stopPropagation();
+        }
     }
   }
 }, false); // Use normal phase instead of capture to avoid interfering with system functions
@@ -3648,9 +3678,12 @@ function enterTextInput() {
     textInput.style.left = pendingText.x + 'px';
     // Position input box so text appears exactly where it will be drawn
     // Canvas fillText draws from baseline, so we need to adjust for that
-    const fontSize = textSizes[textSizeIndex];
-    textInput.style.top = (pendingText.y - fontSize) + 'px'; // Align baseline with click position
-    textInput.style.fontSize = fontSize + 'px'; // Use selected text size to match final output
+  const baseFontSize = textSizes[textSizeIndex];
+  // Scale displayed font size to match current image zoom so WYSIWYG reflects final size
+  const scaledFontSize = Math.round(baseFontSize * currentImageScale);
+  // Align baseline with click position using scaled size
+  textInput.style.top = (pendingText.y - scaledFontSize) + 'px';
+  textInput.style.fontSize = scaledFontSize + 'px';
     textInput.style.fontWeight = 'bold'; // Match the canvas text style
     textInput.style.fontFamily = 'Arial'; // Match the canvas font family
     textInput.style.color = drawingColor;
@@ -3662,7 +3695,7 @@ function enterTextInput() {
     textInput.style.padding = '1px 3px'; // Very minimal padding to maintain position accuracy
     textInput.style.zIndex = '1000';
     // Scale minimum width with text size
-    const minWidth = Math.max(80, fontSize * 2.5); // Smaller minimum width for better precision
+  const minWidth = Math.max(80, scaledFontSize * 2.5); // Scale min width with on-screen font size
     textInput.style.minWidth = minWidth + 'px';
     
     document.body.appendChild(textInput);
@@ -3718,15 +3751,16 @@ function drawTextOnCanvas(x, y, text) {
   console.log(`*** DRAWING TEXT *** "${text}" at (${x}, ${y}) with size index ${textSizeIndex}`);
   
   if (drawingCtx) {
-    // Use the selected text size from the textSizes array
-    const fontSize = textSizes[textSizeIndex];
-    drawingCtx.font = `bold ${fontSize}px Arial`;
+    // Use selected text size scaled by currentImageScale so that after commit (which scales down) final size matches chosen size
+    const baseFontSize = textSizes[textSizeIndex];
+    const scaledFontSize = Math.round(baseFontSize * currentImageScale);
+    drawingCtx.font = `bold ${scaledFontSize}px Arial`;
     
     // Simple text drawing - no background, no outline, no shadows
     drawingCtx.fillStyle = drawingColor;
     drawingCtx.fillText(text, x, y);
     
-    console.log(`*** TEXT DRAWING COMPLETED *** in color ${drawingColor} at size ${fontSize}px (H${textSizeIndex + 1})`);
+    console.log(`*** TEXT DRAWING COMPLETED *** in color ${drawingColor} at scaled size ${scaledFontSize}px (base ${baseFontSize}px, scale ${currentImageScale.toFixed(2)}) (H${textSizeIndex + 1})`);
   } else {
     console.error('*** TEXT DRAWING FAILED *** - no drawing context');
   }
