@@ -2146,44 +2146,34 @@ document.addEventListener('keydown', async (event) => {
     // If no image loaded, let Enter key pass through for normal capture functionality
   }
 
-  // Handle Escape (exit text mode) - ONLY when image is loaded and in text mode
+  // Handle Escape (text input cancel OR exit text mode) - ONLY when image is loaded
   else if (event.key === 'Escape' && !event.ctrlKey && !event.altKey && !event.shiftKey) {
     const content = document.querySelector('.content');
     const backgroundImage = getComputedStyle(content).backgroundImage;
 
-    // Only handle Escape if we have an image loaded
     if (backgroundImage && backgroundImage !== 'none') {
-      // Check if we're currently typing in a text input - let text input handler deal with it
       const activeElement = document.activeElement;
+
+      // Case 1: An input is active → let its own handler cancel (it keeps textMode on first Escape)
       if (activeElement && (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA')) {
-        // Text input's own Escape handler will clean up the input
-        return;
+        return; // Input's own key handler manages cleanup
       }
 
-      // If in text mode, exit it
+      // Case 2: No active input & we are still in text mode → exit text mode WITHOUT discarding placed text
       if (textMode) {
         event.preventDefault();
         event.stopPropagation();
+        const hadUncommittedContent = checkIfCanvasHasContent();
+        debugLog(`*** ESCAPE KEY PRESSED *** - Exiting text mode (uncommittedContent=${hadUncommittedContent})`);
 
-        debugLog('*** ESCAPE KEY PRESSED *** - Exiting text mode');
+        // Do NOT clear canvas here; keep any placed (but uncommitted) text so user can still commit later with Enter
+        // This enables workflow: T → type → Enter (place) → Escape (return to normal) → Enter (commit) if desired
 
-        // Check if there's uncommitted text on canvas
-        const hasTextOnCanvas = checkIfCanvasHasContent();
-        if (hasTextOnCanvas) {
-          // Discard uncommitted text by clearing the canvas
-          debugLog('*** DISCARDING UNCOMMITTED TEXT ***');
-          if (drawingCtx) {
-            drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
-            console.log('Canvas cleared - uncommitted text discarded');
-          }
-        }
-
-        // Exit text mode and return to arrow mode
-        setTextMode(false, 'Escape key pressed');
-        setDrawingMode('arrow', 'Escape key pressed - exiting text mode');
-        document.body.style.cursor = 'default';
+        setTextMode(false, 'Escape key pressed - leaving text mode');
+        setDrawingMode('arrow', 'Escape key pressed - returning to arrow mode');
+        document.body.style.cursor = 'crosshair'; // Arrow drawing cursor
         updateBorderColor();
-        console.log('*** TEXT MODE EXITED *** - Returned to arrow mode, normal commands available');
+        console.log('*** TEXT MODE EXITED *** - Existing uncommitted text retained; normal mouse operations restored');
       }
     }
   }
@@ -3711,11 +3701,13 @@ function enterTextInput() {
         console.log(`*** TEXT PLACED *** textMode: ${textMode}, drawingMode: ${drawingMode} - staying in text mode`);
         console.log('Text placed on canvas - click elsewhere for more text, or press Enter to commit all text');
       } else if (event.key === 'Escape') {
-        // Cancel current text input but stay in text mode
+        // Cancel current text input AND exit text mode (user requested behavior)
         cleanupTextInput();
-        // KEEP text mode active - just cancel this specific text entry
-        // textMode stays true, drawingMode stays 'text'  
-        console.log('Text input canceled - still in text mode, click elsewhere for more text');
+        setTextMode(false, 'Escape inside text input - cancel and exit text mode');
+        setDrawingMode('arrow', 'Escape inside text input - returning to arrow mode');
+        document.body.style.cursor = 'crosshair';
+        updateBorderColor();
+        console.log('*** TEXT INPUT CANCELED *** - Exited text mode, normal mouse operations restored');
       }
     });
   }
