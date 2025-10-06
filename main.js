@@ -35,29 +35,24 @@ function createWindow() {
     }
   });
 
-  // Initialize window state tracking
+  // Initialize window state tracking with ACTUAL window bounds
   // CRITICAL: These values are the ONLY source of truth for window position/size
   // DO NOT read back from getBounds() during position moves - causes drift!
-  windowStates.set(newWindow.id, { x: 100, y: 100, width: 1200, height: 800 });
-  
-  // Only update tracking when user manually resizes (not during programmatic moves)
-  // CRITICAL: This prevents the resize event from interfering with position moves
-  // The programmaticMoves flag prevents drift from setBounds() triggering resize events
-  newWindow.on('resize', () => {
-    // Skip if this is a programmatic move
-    if (programmaticMoves.has(newWindow.id)) {
-      console.log(`Ignoring resize event for programmatic move on window ${newWindow.id}`);
-      return;
-    }
-    
-    const bounds = newWindow.getBounds();
-    const state = windowStates.get(newWindow.id);
-    if (state) {
-      state.width = bounds.width;
-      state.height = bounds.height;
-      console.log(`Window ${newWindow.id} manually resized to: ${bounds.width}x${bounds.height}`);
-    }
+  // We do ONE initial read to sync with Electron's actual window placement
+  const initialBounds = newWindow.getBounds();
+  windowStates.set(newWindow.id, {
+    x: initialBounds.x,
+    y: initialBounds.y,
+    width: initialBounds.width,
+    height: initialBounds.height
   });
+  console.log(`Window ${newWindow.id} initialized at: ${initialBounds.x}, ${initialBounds.y}, ${initialBounds.width}x${initialBounds.height}`);
+
+  // NOTE: We do NOT use the 'resize' event listener because:
+  // 1. Electron fires 'resize' even for position-only changes (setBounds with x/y only)
+  // 2. This causes false positive resize detection
+  // 3. All intentional resizes go through 'set-window-bounds' IPC handler which updates state
+  // 4. User manual resizing is not supported in this frameless transparent window application
   
   // Clean up tracking when window closed
   newWindow.on('closed', () => {
@@ -664,13 +659,29 @@ ipcMain.handle('do-drag', (event, { x, y, targetWidth, targetHeight }) => {
   if (!senderWindow) {
     throw new Error('Could not find sender window');
   }
-  
+
+  // Update tracked state before setting bounds
+  let state = windowStates.get(senderWindow.id);
+  if (!state) {
+    console.log(`WARNING: No state found for window ${senderWindow.id} in do-drag, creating new state`);
+    state = { x: 100, y: 100, width: 1200, height: 800 };
+    windowStates.set(senderWindow.id, state);
+  }
+
+  state.x = x;
+  state.y = y;
+  state.width = targetWidth;
+  state.height = targetHeight;
+
+  console.log(`do-drag: Window ${senderWindow.id} moved to (${Math.round(x)}, ${Math.round(y)}) size ${Math.round(targetWidth)}x${Math.round(targetHeight)}`);
+  console.log(`do-drag: Updated windowStates:`, state);
+
   // Set both position and size to prevent window from growing
   senderWindow.setBounds({
-    x: x,
-    y: y,
-    width: targetWidth,
-    height: targetHeight
+    x: Math.round(x),
+    y: Math.round(y),
+    width: Math.round(targetWidth),
+    height: Math.round(targetHeight)
   });
 });
 
@@ -697,29 +708,41 @@ ipcMain.handle('set-window-bounds', (event, { x, y, width, height }) => {
   let state = windowStates.get(senderWindow.id);
   if (!state) {
     // Initialize if missing
+    console.log(`WARNING: No state found for window ${senderWindow.id} in set-window-bounds, creating new state`);
     state = { x: 100, y: 100, width: 1200, height: 800 };
     windowStates.set(senderWindow.id, state);
   }
-  
+
+  console.log(`set-window-bounds BEFORE: Window ${senderWindow.id} state was:`, JSON.parse(JSON.stringify(state)));
+  console.log(`set-window-bounds INPUTS: x=${x}, y=${y}, width=${width}, height=${height}`);
+
   // Update tracked state with provided values
   if (x !== undefined) state.x = x;
   if (y !== undefined) state.y = y;
   if (width !== undefined) state.width = width;
   if (height !== undefined) state.height = height;
-  
-  console.log(`Setting window bounds from tracked state: x=${state.x}, y=${state.y}, w=${state.width}, h=${state.height}`);
-  
+
+  console.log(`set-window-bounds AFTER: Window ${senderWindow.id} state is now:`, state);
+
   // Mark as programmatic move to prevent resize event interference
   // CRITICAL: This prevents the resize event from reading back and causing drift
   programmaticMoves.add(senderWindow.id);
-  
-  // Apply tracked state to window (one-way: code → screen)
-  senderWindow.setBounds({
+
+  // CRITICAL: Always use stored state values, NEVER read back from getBounds()
+  // Reading back causes cumulative drift due to DPI scaling and rounding
+  // The caller MUST provide width/height when they change (image load, paste, scale)
+  // For position-only moves, state retains the last known correct size
+  const boundsToSet = {
     x: Math.round(state.x),
     y: Math.round(state.y),
     width: Math.round(state.width),
     height: Math.round(state.height)
-  });
+  };
+
+  console.log(`set-window-bounds APPLYING:`, boundsToSet);
+
+  // Apply to window (one-way: code → screen)
+  senderWindow.setBounds(boundsToSet);
   
   // Clear programmatic flag after a short delay
   setTimeout(() => {
@@ -1946,7 +1969,20 @@ ipcMain.handle('process-screen-selection', async (event, selectionData) => {
     };
     
     targetWindow.setBounds(newBounds);
-    
+
+    // CRITICAL: Update windowStates with the new bounds
+    // This ensures position tracking works correctly after selection capture
+    let state = windowStates.get(targetWindow.id);
+    if (!state) {
+      state = { x: 100, y: 100, width: 1200, height: 800 };
+      windowStates.set(targetWindow.id, state);
+    }
+    state.x = newBounds.x;
+    state.y = newBounds.y;
+    state.width = newBounds.width;
+    state.height = newBounds.height;
+    console.log(`Updated windowStates for window ${targetWindow.id}:`, state);
+
     // Ensure window is visible and focused (especially important if main window was minimized)
     if (isFirstCapture) {
       targetWindow.show(); // Explicitly show the window

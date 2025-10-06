@@ -235,24 +235,30 @@ ipcRenderer.on('reset-scale', () => {
         width: originalWindowBounds.width,
         height: originalWindowBounds.height
       });
+      // Update tracked position
+      trackedWindowPosition.x = originalWindowBounds.x;
+      trackedWindowPosition.y = originalWindowBounds.y;
     } else {
       // Fallback to base size if no original bounds available
       ipcRenderer.invoke('get-window-bounds').then(currentBounds => {
         const newWidth = baseWindowWidth;
         const newHeight = baseWindowHeight;
-        
+
         // Calculate new position to keep window centered on its current center
         const currentCenterX = currentBounds.x + currentBounds.width / 2;
         const currentCenterY = currentBounds.y + currentBounds.height / 2;
-        const newX = currentCenterX - newWidth / 2;
-        const newY = currentCenterY - newHeight / 2;
-        
+        const newX = Math.floor(currentCenterX - newWidth / 2);
+        const newY = Math.floor(currentCenterY - newHeight / 2);
+
         ipcRenderer.invoke('set-window-bounds', {
-          x: Math.floor(newX),
-          y: Math.floor(newY),
+          x: newX,
+          y: newY,
           width: newWidth,
           height: newHeight
         });
+        // Update tracked position
+        trackedWindowPosition.x = newX;
+        trackedWindowPosition.y = newY;
       });
     }
     
@@ -334,9 +340,13 @@ ipcRenderer.on('menu-load-file', async () => {
         };
         
         console.log(`Resizing window to match loaded image: ${newBounds.width}x${newBounds.height}px`);
-        
+
         await ipcRenderer.invoke('set-window-bounds', newBounds);
-        
+
+        // Update tracked position to match the new bounds
+        trackedWindowPosition.x = newBounds.x;
+        trackedWindowPosition.y = newBounds.y;
+
         // Position the image at (0,0) since there's no visible border
         const initialX = 0;
         const initialY = 0;
@@ -848,14 +858,18 @@ document.addEventListener('wheel', (event) => {
         // Keep window centered during resize
         const newX = currentBounds.x + Math.round((currentBounds.width - newWidth) / 2);
         const newY = currentBounds.y + Math.round((currentBounds.height - newHeight) / 2);
-        
+
         ipcRenderer.invoke('set-window-bounds', {
           x: newX,
           y: newY,
           width: newWidth,
           height: newHeight
         });
-        
+
+        // Update tracked position
+        trackedWindowPosition.x = newX;
+        trackedWindowPosition.y = newY;
+
         console.log(`Window scaled to: ${newWidth}x${newHeight}px at (${newX}, ${newY})`);
       });
     } catch (error) {
@@ -893,14 +907,18 @@ document.addEventListener('wheel', (event) => {
         // Keep window centered during resize
         const newX = currentBounds.x + Math.round((currentBounds.width - newWidth) / 2);
         const newY = currentBounds.y + Math.round((currentBounds.height - newHeight) / 2);
-        
+
         ipcRenderer.invoke('set-window-bounds', {
           x: newX,
           y: newY,
           width: newWidth,
           height: newHeight
         });
-        
+
+        // Update tracked position
+        trackedWindowPosition.x = newX;
+        trackedWindowPosition.y = newY;
+
         console.log(`Window scaled to: ${newWidth}x${newHeight}px at (${newX}, ${newY})`);
       });
     } catch (error) {
@@ -989,6 +1007,20 @@ document.addEventListener('dblclick', async (event) => {
         console.log('Fallback: captured current window bounds:', originalWindowBounds);
       }
       currentWindowScale = 1.0; // Reset window scale tracking
+
+      // CRITICAL: Update tracking states with the captured window bounds
+      // This ensures Shift+Arrow and other position operations work correctly after screenshot
+      trackedWindowPosition.x = originalWindowBounds.x;
+      trackedWindowPosition.y = originalWindowBounds.y;
+
+      // Update main.js windowStates with the actual captured window dimensions
+      await ipcRenderer.invoke('set-window-bounds', {
+        x: originalWindowBounds.x,
+        y: originalWindowBounds.y,
+        width: originalWindowBounds.width,
+        height: originalWindowBounds.height
+      });
+      console.log('Updated tracking states with screenshot window bounds:', originalWindowBounds);
       
       console.log(`Screenshot applied successfully!`);
       console.log(`- Scale factor: ${scaleFactor}`);
@@ -1297,10 +1329,14 @@ document.addEventListener('mousemove', async (event) => {
             targetWidth: dragInfo.targetWidth,
             targetHeight: dragInfo.targetHeight
           });
+
+          // Update tracked position after successful drag
+          trackedWindowPosition.x = newX;
+          trackedWindowPosition.y = newY;
         } catch (error) {
           console.error('Failed to drag window in combined mode:', error);
         }
-        
+
         // Move the image (keeping it in the same relative position within the window)
         // Since the window moved, the image doesn't need to move relative to the window
         // This maintains the traditional behavior where the image moves with the window
@@ -1340,7 +1376,11 @@ document.addEventListener('mousemove', async (event) => {
           targetWidth: dragInfo.targetWidth,
           targetHeight: dragInfo.targetHeight
         });
-        
+
+        // Update tracked position after successful drag
+        trackedWindowPosition.x = newX;
+        trackedWindowPosition.y = newY;
+
         // Adjust image position in opposite direction to keep it stationary on screen
         // Calculate offset based on total window movement from start, not incremental deltas
         imageOffset.x = dragInfo.initialOffsetX - totalWindowMoveX;
@@ -1467,13 +1507,25 @@ document.addEventListener('mouseup', (event) => {
   }
   
   if (isDragging) {
+    // If this was a window drag, ensure trackedWindowPosition is synced with final position
+    if (!isImageDrag) {
+      // Get the actual window position after drag completes
+      ipcRenderer.invoke('get-window-bounds').then(bounds => {
+        trackedWindowPosition.x = bounds.x;
+        trackedWindowPosition.y = bounds.y;
+        console.log(`Drag ended - synced tracked position to: ${bounds.x}, ${bounds.y}`);
+      }).catch(err => {
+        console.error('Failed to sync position after drag:', err);
+      });
+    }
+
     isDragging = false;
     dragInfo = null;
     console.log(isCombinedDrag ? 'Combined drag ended' : (isImageDrag ? 'Image drag ended' : 'Window drag ended'));
     isImageDrag = false;
     isCombinedDrag = false;
     rightClickDragStarted = false; // Reset flag
-    
+
     // Reset cursor based on current modifier state
     updateCursor(event);
   }
@@ -1625,9 +1677,13 @@ document.addEventListener('keydown', async (event) => {
           };
           
           console.log(`Resizing window to match image exactly: ${newBounds.width}x${newBounds.height}px`);
-          
+
           await ipcRenderer.invoke('set-window-bounds', newBounds);
-          
+
+          // Update tracked position to match the new bounds
+          trackedWindowPosition.x = newBounds.x;
+          trackedWindowPosition.y = newBounds.y;
+
           // Position the image at (0,0) since there's no visible border
           const initialX = 0;
           const initialY = 0;
@@ -2042,16 +2098,16 @@ document.addEventListener('keydown', async (event) => {
   else if (event.key === 'Enter' && !event.ctrlKey && !event.altKey && !event.shiftKey) {
     const content = document.querySelector('.content');
     const backgroundImage = getComputedStyle(content).backgroundImage;
-    
+
     debugLog(`*** ENTER KEY PRESSED *** textMode: ${textMode}, pendingText: ${!!pendingText}, drawingMode: ${drawingMode}`);
     debugLog(`*** BACKGROUND IMAGE CHECK *** backgroundImage: ${backgroundImage}`);
-    
+
     // Only handle Enter for drawing if we have an image loaded
     if (backgroundImage && backgroundImage !== 'none') {
       debugLog('*** IMAGE IS LOADED *** - processing Enter key');
       event.preventDefault();
       event.stopPropagation();
-      
+
       if (textMode && pendingText) {
         // This case should not happen anymore since clicking immediately opens text input
         debugLog('*** REDUNDANT ENTER IN TEXT MODE *** - Text input should have opened automatically');
@@ -2088,6 +2144,48 @@ document.addEventListener('keydown', async (event) => {
       debugLog('*** NO IMAGE LOADED *** - Enter key ignored');
     }
     // If no image loaded, let Enter key pass through for normal capture functionality
+  }
+
+  // Handle Escape (exit text mode) - ONLY when image is loaded and in text mode
+  else if (event.key === 'Escape' && !event.ctrlKey && !event.altKey && !event.shiftKey) {
+    const content = document.querySelector('.content');
+    const backgroundImage = getComputedStyle(content).backgroundImage;
+
+    // Only handle Escape if we have an image loaded
+    if (backgroundImage && backgroundImage !== 'none') {
+      // Check if we're currently typing in a text input - let text input handler deal with it
+      const activeElement = document.activeElement;
+      if (activeElement && (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA')) {
+        // Text input's own Escape handler will clean up the input
+        return;
+      }
+
+      // If in text mode, exit it
+      if (textMode) {
+        event.preventDefault();
+        event.stopPropagation();
+
+        debugLog('*** ESCAPE KEY PRESSED *** - Exiting text mode');
+
+        // Check if there's uncommitted text on canvas
+        const hasTextOnCanvas = checkIfCanvasHasContent();
+        if (hasTextOnCanvas) {
+          // Discard uncommitted text by clearing the canvas
+          debugLog('*** DISCARDING UNCOMMITTED TEXT ***');
+          if (drawingCtx) {
+            drawingCtx.clearRect(0, 0, drawingCanvas.width, drawingCanvas.height);
+            console.log('Canvas cleared - uncommitted text discarded');
+          }
+        }
+
+        // Exit text mode and return to arrow mode
+        setTextMode(false, 'Escape key pressed');
+        setDrawingMode('arrow', 'Escape key pressed - exiting text mode');
+        document.body.style.cursor = 'default';
+        updateBorderColor();
+        console.log('*** TEXT MODE EXITED *** - Returned to arrow mode, normal commands available');
+      }
+    }
   }
 }, false); // Use normal phase instead of capture to avoid interfering with system functions
 
@@ -2195,9 +2293,13 @@ document.addEventListener('DOMContentLoaded', () => {
               };
               
               console.log(`Resizing window to match dropped image: ${newBounds.width}x${newBounds.height}px`);
-              
+
               await ipcRenderer.invoke('set-window-bounds', newBounds);
-              
+
+              // Update tracked position
+              trackedWindowPosition.x = newBounds.x;
+              trackedWindowPosition.y = newBounds.y;
+
               // Position the image at (0,0) since there's no visible border
               const initialX = 0;
               const initialY = 0;
@@ -2832,7 +2934,12 @@ ipcRenderer.on('load-selected-area', async (event, selectionData) => {
         width: currentBounds.width,
         height: currentBounds.height
       };
-      
+
+      // CRITICAL: Update tracked position with the actual window position after selection capture
+      trackedWindowPosition.x = currentBounds.x;
+      trackedWindowPosition.y = currentBounds.y;
+      console.log(`Updated trackedWindowPosition after selection: (${currentBounds.x}, ${currentBounds.y})`);
+
       console.log(`Full screenshot loaded in window - shows selected area but can be repositioned/scaled`);
     };
     
