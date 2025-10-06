@@ -216,9 +216,15 @@ function confirmSelection() {
   window.close();
 }
 
-// Keyboard events are now handled by global shortcuts in main process
-// This provides better reliability than window-level events
-console.log('Keyboard events handled by global shortcuts (Enter/Escape)');
+// Handle Escape key locally in this window to avoid global shortcut conflicts
+document.addEventListener('keydown', (event) => {
+  if (event.key === 'Escape') {
+    console.log('Escape pressed in selection window - closing');
+    event.preventDefault();
+    window.close();
+  }
+});
+console.log('Local Escape key handler registered for selection window');
 
 // Handle context menu
 document.addEventListener('contextmenu', (event) => {

@@ -1664,38 +1664,8 @@ function registerGlobalShortcuts() {
 // Track last shortcut time to prevent rapid-fire
 let lastShortcutTime = 0;
 
-// Register temporary global shortcuts for selection interface
-function registerSelectionShortcuts(selectionWindow) {
-  // Unregister any existing selection shortcuts first
-  unregisterSelectionShortcuts();
-  
-  // Only register Escape for cancel (Enter is now handled by click)
-  const escapeRegistered = globalShortcut.register('Escape', () => {
-    console.log('Global Escape pressed - canceling selection');
-    if (selectionWindow && !selectionWindow.isDestroyed()) {
-      console.log('Closing selection window via global shortcut');
-      selectionWindow.close();
-    }
-    // Unregister selection shortcuts when canceled
-    unregisterSelectionShortcuts();
-  });
-  
-  if (escapeRegistered) {
-    console.log('Selection Escape shortcut registered');
-  } else {
-    console.log('Failed to register selection Escape shortcut');
-  }
-}
-
-// Unregister selection-specific shortcuts
-function unregisterSelectionShortcuts() {
-  try {
-    globalShortcut.unregister('Escape');
-    console.log('Selection shortcuts unregistered');
-  } catch (error) {
-    // Ignore errors if shortcuts weren't registered
-  }
-}
+// Selection window now handles Escape locally via selection.js
+// No global shortcuts needed to avoid conflicts with main window
 
 // Capture screen where mouse cursor is located and show selection interface
 async function captureScreenWithSelection() {
@@ -1768,8 +1738,7 @@ async function captureScreenWithSelection() {
       // NOW create the selection window AFTER clean screenshot is taken
       let selectionWindow = createSelectionWindow(currentDisplay);
 
-      // Register only Escape shortcut for selection window (Enter now handled by click)
-      registerSelectionShortcuts(selectionWindow);
+      // Note: Escape is now handled locally in selection.js to avoid global shortcut conflicts
 
       // Send the screenshot to the selection window
       selectionWindow.webContents.send('show-screenshot-for-selection', {
@@ -1872,10 +1841,9 @@ function createSelectionWindow(display) {
     console.log('Selection window focused for keyboard input');
   });
   
-  // Clean up shortcuts when window closes
+  // Window close event for cleanup (shortcuts now handled locally in selection.js)
   selectionWindow.on('closed', () => {
-    console.log(`Selection window ${selectionWindow.id} closed - cleaning up shortcuts`);
-    unregisterSelectionShortcuts();
+    console.log(`Selection window ${selectionWindow.id} closed`);
   });
 
   console.log(`Selection window ${selectionWindow.id} created successfully`);
@@ -1961,10 +1929,7 @@ async function processSelectionData(selectionData) {
     
     console.log('Selection data sent to new window');
     console.log(`Created new window with selected area: ${selectionData.width}x${selectionData.height}`);
-    
-    // Unregister selection shortcuts since selection is confirmed
-    unregisterSelectionShortcuts();
-    
+
   } catch (error) {
     console.error('Error processing selection data:', error);
   } finally {
