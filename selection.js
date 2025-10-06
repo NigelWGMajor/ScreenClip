@@ -23,11 +23,24 @@ ipcRenderer.on('show-screenshot-for-selection', (event, data) => {
   console.log('Screenshot loaded for selection');
 });
 
+// Reset selection state (called when window is reused)
+function resetSelection() {
+  console.log('Resetting selection interface state');
+  isSelecting = false;
+  startX = 0;
+  startY = 0;
+  selectionBounds = null;
+  isConfirming = false;
+  selection.style.display = 'none';
+  selection.classList.remove('selectable');
+  document.body.style.cursor = 'crosshair';
+}
+
 // Helper function to check if a point is within the selection rectangle
 function isPointInSelection(x, y, bounds) {
-  return x >= bounds.left && 
-         x <= bounds.left + bounds.width && 
-         y >= bounds.top && 
+  return x >= bounds.left &&
+         x <= bounds.left + bounds.width &&
+         y >= bounds.top &&
          y <= bounds.top + bounds.height;
 }
 
@@ -183,8 +196,8 @@ function confirmSelection() {
   };
   
   console.log('Sending selection data to main process...');
-  
-  // Process selection and close window immediately after
+
+  // Send selection data to main process (fire and forget)
   ipcRenderer.invoke('process-screen-selection', selectionData)
     .then((result) => {
       if (result.success) {
@@ -192,14 +205,15 @@ function confirmSelection() {
       } else {
         console.error('Failed to process selection:', result.error);
       }
-      // Close window regardless of success/failure
-      window.close();
     })
     .catch((error) => {
       console.error('Error processing selection:', error);
-      // Close window even on error
-      window.close();
     });
+
+  // Close window immediately after sending data (don't wait for processing)
+  // This prevents the window from receiving more clicks while processing
+  console.log('Closing selection window immediately');
+  window.close();
 }
 
 // Keyboard events are now handled by global shortcuts in main process

@@ -415,7 +415,7 @@ function createWindow() {
     {
       label: 'New Window',
       click: () => {
-        createWindow();
+        captureScreenWithSelection();
       }
     },
     {
@@ -1118,8 +1118,10 @@ ipcMain.handle('get-custom-tolerance', async (event) => {
 ipcMain.handle('create-new-window', async (event) => {
   try {
     console.log('Creating new window from renderer request...');
-    const newWindow = createWindow();
-    return { success: true, windowId: newWindow.id };
+    // Instead of creating an empty window, trigger the selection interface
+    // This gives the user the blue box to drag and select an area
+    await captureScreenWithSelection();
+    return { success: true };
   } catch (error) {
     console.error('Failed to create new window:', error);
     return { success: false, error: error.message };
@@ -1608,7 +1610,7 @@ function createTray() {
     {
       label: 'New Window',
       click: () => {
-        createWindow();
+        captureScreenWithSelection();
       }
     },
     { type: 'separator' },
@@ -1701,16 +1703,36 @@ async function captureScreenWithSelection() {
     // Get cursor position to determine which screen to capture
     const cursorPosition = screen.getCursorScreenPoint();
     const currentDisplay = screen.getDisplayNearestPoint(cursorPosition);
-    
+
     console.log(`Cursor at (${cursorPosition.x}, ${cursorPosition.y}), capturing display:`, currentDisplay.bounds);
-    
-    // Create or find a window for the selection interface
-    let selectionWindow = createSelectionWindow(currentDisplay);
-    
-    // Register only Escape shortcut for selection window (Enter now handled by click)
-    registerSelectionShortcuts(selectionWindow);
-    
-    // Capture the current screen
+
+    // FIRST: Hide all borders before taking screenshot
+    console.log('Hiding borders before screenshot...');
+    const windowsWithBorders = [];
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.selectionWindow && !win.isDestroyed()) {
+        try {
+          const hasBorder = await win.webContents.executeJavaScript(
+            `(() => { const body = document.body; return !body.classList.contains('border-hidden'); })()`
+          );
+          if (hasBorder) {
+            windowsWithBorders.push(win);
+            await win.webContents.executeJavaScript(`
+              (() => { document.body.classList.add('border-hidden'); })()
+            `);
+            console.log(`Hid border for window ${win.id} before screenshot`);
+          }
+        } catch (error) {
+          console.error(`Error hiding border for window ${win.id}:`, error);
+        }
+      }
+    }
+
+    // Wait for borders to hide
+    await new Promise(resolve => setTimeout(resolve, 200));
+    console.log(`${windowsWithBorders.length} window borders hidden`);
+
+    // Capture the current screen WITHOUT borders
     const sources = await desktopCapturer.getSources({
       types: ['screen'],
       thumbnailSize: {
@@ -1718,22 +1740,44 @@ async function captureScreenWithSelection() {
         height: currentDisplay.bounds.height * currentDisplay.scaleFactor
       }
     });
-    
+
     // Find the source that matches our display
     const screenSource = sources.find(source => {
       return source.display_id === currentDisplay.id.toString();
     });
-    
+
     if (screenSource) {
       const screenshot = screenSource.thumbnail.toDataURL();
-      
+      console.log('Clean screenshot captured (no borders)');
+
+      // RESTORE borders immediately after screenshot
+      for (const win of windowsWithBorders) {
+        if (!win.isDestroyed()) {
+          try {
+            await win.webContents.executeJavaScript(`
+              (() => { document.body.classList.remove('border-hidden'); })()
+            `);
+            console.log(`Restored border for window ${win.id}`);
+          } catch (error) {
+            console.error(`Error restoring border for window ${win.id}:`, error);
+          }
+        }
+      }
+      console.log('Borders restored - user can now see them while dragging selection');
+
+      // NOW create the selection window AFTER clean screenshot is taken
+      let selectionWindow = createSelectionWindow(currentDisplay);
+
+      // Register only Escape shortcut for selection window (Enter now handled by click)
+      registerSelectionShortcuts(selectionWindow);
+
       // Send the screenshot to the selection window
       selectionWindow.webContents.send('show-screenshot-for-selection', {
         screenshot,
         displayBounds: currentDisplay.bounds,
         scaleFactor: currentDisplay.scaleFactor
       });
-      
+
       // Ensure proper focus and always-on-top after screenshot is sent
       setTimeout(() => {
         if (!selectionWindow.isDestroyed()) {
@@ -1753,11 +1797,11 @@ async function captureScreenWithSelection() {
         }
       }, 300);
       
-      console.log(`Screenshot captured for selection interface`);
+      console.log(`Screenshot captured for selection interface (with borders visible)`);
     } else {
       console.error('Could not find screen source for current display');
     }
-    
+
   } catch (error) {
     console.error('Error capturing screen with selection:', error);
   }
@@ -1765,19 +1809,23 @@ async function captureScreenWithSelection() {
 
 // Create a fullscreen selection window
 function createSelectionWindow(display) {
-  // Check if we already have a selection window
+  // Check if we already have a selection window and destroy it
   let existingWindow = BrowserWindow.getAllWindows().find(win => win.selectionWindow === true);
-  
+
   if (existingWindow && !existingWindow.isDestroyed()) {
-    existingWindow.show();
-    existingWindow.focus();
-    existingWindow.setAlwaysOnTop(true, 'screen-saver');
-    existingWindow.moveTop();
-    console.log('Reusing existing selection window with always-on-top enforced');
-    return existingWindow;
+    console.log(`Found existing selection window ${existingWindow.id}, destroying it to create fresh one`);
+    try {
+      existingWindow.destroy();
+      console.log('Existing selection window destroyed');
+    } catch (error) {
+      console.error('Error destroying existing selection window:', error);
+    }
+  } else {
+    console.log('No existing selection window found, creating new one');
   }
-  
-  // Create new selection window
+
+  // Always create a fresh selection window
+  console.log('Creating new selection window...');
   const selectionWindow = new BrowserWindow({
     x: display.bounds.x,
     y: display.bounds.y,
@@ -1802,9 +1850,19 @@ function createSelectionWindow(display) {
   // Mark this as a selection window
   selectionWindow.selectionWindow = true;
   
-  // Load the selection interface (we'll need to create this)
-  selectionWindow.loadFile('selection.html');
-  
+  // Load the selection interface
+  console.log('Loading selection.html into window...');
+  selectionWindow.loadFile('selection.html').then(() => {
+    console.log('selection.html loaded successfully');
+  }).catch(err => {
+    console.error('Error loading selection.html:', err);
+  });
+
+  // Listen for renderer console messages
+  selectionWindow.webContents.on('console-message', (event, level, message) => {
+    console.log(`[SELECTION RENDERER] ${message}`);
+  });
+
   // Ensure the window can receive keyboard events
   selectionWindow.once('ready-to-show', () => {
     selectionWindow.show();
@@ -1816,10 +1874,11 @@ function createSelectionWindow(display) {
   
   // Clean up shortcuts when window closes
   selectionWindow.on('closed', () => {
-    console.log('Selection window closed - cleaning up shortcuts');
+    console.log(`Selection window ${selectionWindow.id} closed - cleaning up shortcuts`);
     unregisterSelectionShortcuts();
   });
-  
+
+  console.log(`Selection window ${selectionWindow.id} created successfully`);
   return selectionWindow;
 }
 
@@ -1929,9 +1988,24 @@ ipcMain.handle('process-screen-selection', async (event, selectionData) => {
     
     // Determine if this is the first capture by checking if mainWindow exists and has no content
     // The main window is created on app start but has no image content until first capture
-    const isFirstCapture = mainWindow && !mainWindow.isDestroyed() && windows.length === 1;
+    // Check if mainWindow has content by asking it
+    let isFirstCapture = false;
+    if (mainWindow && !mainWindow.isDestroyed() && windows.length === 1) {
+      // Ask the main window if it has an image loaded
+      try {
+        const hasImage = await mainWindow.webContents.executeJavaScript(
+          `(() => { const content = document.querySelector('.content'); const bg = getComputedStyle(content).backgroundImage; return bg && bg !== 'none'; })()`
+        );
+        isFirstCapture = !hasImage; // First capture only if NO image
+        console.log(`Main window has image: ${hasImage}, isFirstCapture: ${isFirstCapture}`);
+      } catch (error) {
+        console.error('Error checking main window image status:', error);
+        isFirstCapture = false; // Default to creating new window if check fails
+      }
+    }
+
     let targetWindow;
-    
+
     if (isFirstCapture) {
       // Use the existing main window for the first capture
       targetWindow = mainWindow;
@@ -1940,17 +2014,18 @@ ipcMain.handle('process-screen-selection', async (event, selectionData) => {
       // Create a new window for subsequent captures
       targetWindow = createWindow();
       console.log('Creating new window for subsequent capture (windows.length=' + windows.length + ')');
-      
+
       // Wait for the window to be ready
       await new Promise(resolve => {
         targetWindow.once('ready-to-show', resolve);
       });
-      
+
       // Additional wait to ensure renderer is fully loaded
       await new Promise(resolve => setTimeout(resolve, 100));
     }
-    
+
     // Calculate the crop area in the original screenshot coordinates
+    // Note: Clean screenshot without borders was already taken in captureScreenWithSelection()
     const scaleFactor = selectionData.scaleFactor;
     const cropX = Math.floor(selectionData.left * scaleFactor);
     const cropY = Math.floor(selectionData.top * scaleFactor);
@@ -1983,10 +2058,10 @@ ipcMain.handle('process-screen-selection', async (event, selectionData) => {
     state.height = newBounds.height;
     console.log(`Updated windowStates for window ${targetWindow.id}:`, state);
 
-    // Ensure window is visible and focused (especially important if main window was minimized)
+    // Ensure window is visible and focused
+    targetWindow.show(); // Always show the window
     if (isFirstCapture) {
-      targetWindow.show(); // Explicitly show the window
-      targetWindow.restore(); // Restore if minimized
+      targetWindow.restore(); // Restore if minimized (only needed for first capture)
     }
     targetWindow.setAlwaysOnTop(true, 'normal');
     targetWindow.focus();
