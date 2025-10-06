@@ -27,9 +27,11 @@
       "styles.css",
       "selection.html",
       "selection.js",
-      "package.json"
+      "package.json",
+      "assets/icons/TestImage.ico"
     ],
     "win": {
+      "icon": "assets/icons/TestImage.ico",
       "target": [
         {
           "target": "nsis",

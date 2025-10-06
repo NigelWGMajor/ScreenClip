@@ -27,6 +27,7 @@ function createWindow() {
     resizable: true,
     backgroundColor: '#00000000',
     alwaysOnTop: true, // Make window always on top
+    icon: path.join(__dirname, 'assets', 'icons', 'TestImage.ico'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: false,
@@ -1581,8 +1582,20 @@ ipcMain.handle('minimize-to-tray', async (event) => {
 
 // Create system tray
 function createTray() {
-  // Create a simple icon for the tray (you can replace with an actual icon file)
-  const icon = nativeImage.createFromDataURL('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==');
+  // Use packaged icon file if available
+  let iconPath = path.join(__dirname, 'assets', 'icons', 'TestImage.ico');
+  let icon;
+  try {
+    if (fs.existsSync(iconPath)) {
+      icon = nativeImage.createFromPath(iconPath);
+    }
+  } catch (e) {
+    console.error('Error loading tray icon from path', iconPath, e);
+  }
+  if (!icon || icon.isEmpty()) {
+    // Fallback: 1x1 transparent PNG
+    icon = nativeImage.createFromDataURL('data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==');
+  }
   
   tray = new Tray(icon);
   
