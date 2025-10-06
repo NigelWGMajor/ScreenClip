@@ -1,5 +1,11 @@
 const { ipcRenderer } = require('electron');
 
+// Logging suppression for selection window
+const DEBUG = false; // flip to true to re-enable selection window diagnostics
+const __origLog = console.log.bind(console);
+console.log = (...args) => { if (DEBUG) __origLog(...args); };
+
+
 let isSelecting = false;
 let startX = 0;
 let startY = 0;

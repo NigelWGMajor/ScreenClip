@@ -1,10 +1,22 @@
-console.log('Renderer process loaded');
+// Logging suppression / debug flag
+const DEBUG = false; // Set to true for verbose diagnostic output
+// Preserve original console methods
+const __originalConsoleLog = console.log.bind(console);
+// Override console.log to silence when DEBUG is false
+console.log = (...args) => { if (DEBUG) __originalConsoleLog(...args); };
+// Optional: gate other console methods individually if desired
+// const __originalConsoleInfo = console.info.bind(console);
+// console.info = (...args) => { if (DEBUG) __originalConsoleInfo(...args); };
+// Leave console.error & console.warn untouched so real problems surface
+
+// (Removed initial noisy startup log)
 
 // Using direct ipcRenderer since contextIsolation is disabled
 const { ipcRenderer } = require('electron');
 
 // Helper function to send debug messages to main process (so they show in terminal)
 function debugLog(message) {
+  if (!DEBUG) return; // Suppress forwarding when not debugging
   console.log(message);
   ipcRenderer.send('debug-log', message);
 }
