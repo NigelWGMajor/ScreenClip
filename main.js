@@ -18,6 +18,10 @@ let isQuitting = false; // Track if app is quitting to prevent tray restore
 const windowStates = new Map(); // windowId -> {x, y, width, height}
 const programmaticMoves = new Set(); // Track which windows are being moved programmatically
 
+// Track auto-save series state per window
+// windowId -> { directory, baseName, counter }
+const autoSaveStates = new Map();
+
 function createWindow() {
   const newWindow = new BrowserWindow({
     width: 1200,
@@ -67,6 +71,7 @@ function createWindow() {
   // Clean up tracking when window closed
   newWindow.on('closed', () => {
     windowStates.delete(newWindow.id);
+    autoSaveStates.delete(newWindow.id);
   });
 
   newWindow.loadFile('index.html');
@@ -1404,6 +1409,111 @@ ipcMain.handle('save-image', async (event) => {
     return { success: true, filePath: filePath };
   } catch (error) {
     console.error('Failed to save image:', error);
+    return { success: false, error: error.message };
+  }
+});
+
+// IPC handler for auto-save screenshot series (Ctrl+double-click)
+ipcMain.handle('auto-save-screenshot', async (event) => {
+  try {
+    const senderWindow = BrowserWindow.fromWebContents(event.sender);
+    if (!senderWindow) {
+      throw new Error('Sender window not found');
+    }
+
+    const windowId = senderWindow.id;
+    let saveState = autoSaveStates.get(windowId);
+
+    // First time for this window - show save dialog
+    if (!saveState) {
+      const result = await dialog.showSaveDialog(senderWindow, {
+        title: 'Save Screenshot Series',
+        defaultPath: 'screenclip00.png',
+        filters: [
+          { name: 'PNG Images', extensions: ['png'] },
+          { name: 'JPEG Images', extensions: ['jpg', 'jpeg'] },
+          { name: 'All Files', extensions: ['*'] }
+        ]
+      });
+
+      if (result.canceled) {
+        return { success: false, cancelled: true };
+      }
+
+      const filePath = result.filePath;
+      const directory = path.dirname(filePath);
+      const fullName = path.basename(filePath);
+      const ext = path.extname(fullName);
+      const nameWithoutExt = path.basename(fullName, ext);
+
+      // Parse filename to extract base name and number
+      // Look for trailing digits (e.g., "screenclip00" -> base="screenclip", counter=0)
+      const match = nameWithoutExt.match(/^(.+?)(\d+)$/);
+      let baseName, counter;
+
+      if (match) {
+        baseName = match[1];
+        counter = parseInt(match[2], 10);
+      } else {
+        // No number suffix, add "00"
+        baseName = nameWithoutExt;
+        counter = 0;
+      }
+
+      // Store state for this window
+      saveState = { directory, baseName, extension: ext, counter };
+      autoSaveStates.set(windowId, saveState);
+
+      console.log(`Auto-save series initialized for window ${windowId}:`);
+      console.log(`  Directory: ${directory}`);
+      console.log(`  Base name: ${baseName}`);
+      console.log(`  Extension: ${ext}`);
+      console.log(`  Starting counter: ${counter}`);
+    }
+
+    // Generate filename with current counter
+    const paddedCounter = String(saveState.counter).padStart(2, '0');
+    const fileName = `${saveState.baseName}${paddedCounter}${saveState.extension}`;
+    const fullPath = path.join(saveState.directory, fileName);
+
+    console.log(`Auto-saving screenshot to: ${fullPath}`);
+
+    // Temporarily set content to full opacity for capture
+    const originalOpacity = await senderWindow.webContents.executeJavaScript(`
+      (() => {
+        const content = document.querySelector('.content');
+        const opacity = content.style.opacity;
+        content.style.opacity = '1';
+        return opacity;
+      })()
+    `);
+
+    // Wait for render to complete
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    // Capture and save
+    const screenshot = await senderWindow.capturePage();
+    const buffer = screenshot.toPNG();
+
+    // Restore original opacity
+    await senderWindow.webContents.executeJavaScript(`
+      (() => {
+        const content = document.querySelector('.content');
+        content.style.opacity = '${originalOpacity}';
+      })()
+    `);
+
+    // Save file
+    fs.writeFileSync(fullPath, buffer);
+
+    // Increment counter for next save
+    saveState.counter++;
+
+    console.log(`Screenshot saved successfully: ${fileName} (next will be ${String(saveState.counter).padStart(2, '0')})`);
+
+    return { success: true, filePath: fullPath, fileName };
+  } catch (error) {
+    console.error('Failed to auto-save screenshot:', error);
     return { success: false, error: error.message };
   }
 });

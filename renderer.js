@@ -1031,12 +1031,13 @@ document.addEventListener('wheel', (event) => {
 
 // Double-click event to capture screenshot
 document.addEventListener('dblclick', async (event) => {
-  console.log('Double-click detected, capturing screenshot...');
-  
+  const isCtrlHeld = event.ctrlKey;
+  console.log(`Double-click detected${isCtrlHeld ? ' with Ctrl' : ''}, capturing screenshot...`);
+
   try {
     // Request screenshot from main process
     const cropInfo = await ipcRenderer.invoke('capture-screenshot');
-    
+
     console.log('Received cropInfo:', cropInfo ? 'YES' : 'NO');
     
     if (cropInfo && cropInfo.fullScreenshot) {
@@ -1116,7 +1117,24 @@ document.addEventListener('dblclick', async (event) => {
       
       // Update cursor now that we have image content
       updateCursor();
-      
+
+      // If Ctrl was held during double-click, trigger auto-save series
+      if (isCtrlHeld) {
+        console.log('Ctrl+double-click detected - triggering auto-save series');
+        try {
+          const saveResult = await ipcRenderer.invoke('auto-save-screenshot');
+          if (saveResult.success) {
+            console.log(`Screenshot auto-saved to: ${saveResult.filePath}`);
+          } else if (saveResult.cancelled) {
+            console.log('Auto-save cancelled by user');
+          } else {
+            console.error('Auto-save failed:', saveResult.error);
+          }
+        } catch (error) {
+          console.error('Error during auto-save:', error);
+        }
+      }
+
     } else {
       console.error('Failed to capture screenshot - cropInfo is null or missing fullScreenshot');
     }
