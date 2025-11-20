@@ -886,14 +886,14 @@ document.addEventListener('wheel', (event) => {
   event.preventDefault(); // Prevent default scroll behavior
   
   if (event.shiftKey && event.ctrlKey) {
-    // Ctrl+Shift+Wheel: Scale window size (zoom in/out entire window)
+    // Ctrl+Shift+Wheel: Scale both window and content together
     const delta = event.deltaY < 0 ? 1.1 : 0.9; // 10% increment/decrement
-    
+
     try {
       ipcRenderer.invoke('get-window-bounds').then(currentBounds => {
         const newWidth = Math.max(100, Math.round(currentBounds.width * delta));
         const newHeight = Math.max(100, Math.round(currentBounds.height * delta));
-        
+
         // Keep window centered during resize
         const newX = currentBounds.x + Math.round((currentBounds.width - newWidth) / 2);
         const newY = currentBounds.y + Math.round((currentBounds.height - newHeight) / 2);
@@ -909,7 +909,33 @@ document.addEventListener('wheel', (event) => {
         trackedWindowPosition.x = newX;
         trackedWindowPosition.y = newY;
 
-        console.log(`Window scaled to: ${newWidth}x${newHeight}px at (${newX}, ${newY})`);
+        // Also scale the image content proportionally
+        const content = document.querySelector('.content');
+        if (content && originalImageWidth && originalImageHeight) {
+          // Get current window dimensions before resize to calculate center
+          const oldCenterX = currentBounds.width / 2;
+          const oldCenterY = currentBounds.height / 2;
+
+          currentImageScale *= delta;
+          currentImageScale = Math.max(0.1, Math.min(10.0, currentImageScale));
+
+          const newImageWidth = Math.round(originalImageWidth * currentImageScale);
+          const newImageHeight = Math.round(originalImageHeight * currentImageScale);
+
+          // Adjust image position to keep center point fixed during window+content scale
+          // Formula: newOffset = (oldOffset - oldCenter) * delta + newCenter
+          const newCenterX = newWidth / 2;
+          const newCenterY = newHeight / 2;
+          imageOffset.x = (imageOffset.x - oldCenterX) * delta + newCenterX;
+          imageOffset.y = (imageOffset.y - oldCenterY) * delta + newCenterY;
+
+          content.style.backgroundSize = `${newImageWidth}px ${newImageHeight}px`;
+          content.style.backgroundPosition = `${imageOffset.x}px ${imageOffset.y}px`;
+
+          console.log(`Window and content scaled together to: ${(currentImageScale * 100).toFixed(1)}% at (${newX}, ${newY})`);
+        } else {
+          console.log(`Window scaled to: ${newWidth}x${newHeight}px at (${newX}, ${newY})`);
+        }
       });
     } catch (error) {
       console.error('Error scaling window:', error);
@@ -2212,27 +2238,35 @@ document.addEventListener('keydown', async (event) => {
     // If no image loaded, let Enter key pass through for normal capture functionality
   }
 
-  // Handle Escape (text input cancel OR exit text mode) - ONLY when image is loaded
+  // Handle Escape (text mode exit OR hide window)
   else if (event.key === 'Escape' && !event.ctrlKey && !event.altKey && !event.shiftKey) {
-    const content = document.querySelector('.content');
-    const backgroundImage = getComputedStyle(content).backgroundImage;
+    const activeElement = document.activeElement;
 
-    if (backgroundImage && backgroundImage !== 'none') {
-        const activeElement = document.activeElement;
-        // If an input is focused, let its own handler handle Escape (prevents double-processing)
-        if (activeElement && (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA')) {
-          return;
-        }
-        if (textMode) {
-          debugLog('*** ESCAPE KEY PRESSED *** - Exiting text mode (no active input)');
-          exitTextModeStandard('Escape key (no active input)');
-          // Force state (belt-and-suspenders) in case any async code reverts it
-          textMode = false;
-          drawingMode = 'arrow';
-          console.log(`*** ESCAPE POST-EXIT STATE *** textMode=${textMode}, drawingMode=${drawingMode}`);
-          event.preventDefault();
-          event.stopPropagation();
-        }
+    // If an input is focused, let its own handler handle Escape (prevents double-processing)
+    if (activeElement && (activeElement.tagName === 'INPUT' || activeElement.tagName === 'TEXTAREA')) {
+      return;
+    }
+
+    // If in text mode, exit text mode first
+    if (textMode) {
+      debugLog('*** ESCAPE KEY PRESSED *** - Exiting text mode (no active input)');
+      exitTextModeStandard('Escape key (no active input)');
+      // Force state (belt-and-suspenders) in case any async code reverts it
+      textMode = false;
+      drawingMode = 'arrow';
+      console.log(`*** ESCAPE POST-EXIT STATE *** textMode=${textMode}, drawingMode=${drawingMode}`);
+      event.preventDefault();
+      event.stopPropagation();
+    }
+    // If not in text mode, hide the window (keeps systray alive)
+    else {
+      console.log('Escape pressed - hiding window');
+      try {
+        await ipcRenderer.invoke('hide-current-window');
+      } catch (error) {
+        console.error('Error hiding window:', error);
+      }
+      event.preventDefault();
     }
   }
 }, false); // Use normal phase instead of capture to avoid interfering with system functions

@@ -54,7 +54,16 @@ function createWindow() {
   // 2. This causes false positive resize detection
   // 3. All intentional resizes go through 'set-window-bounds' IPC handler which updates state
   // 4. User manual resizing is not supported in this frameless transparent window application
-  
+
+  // Intercept window close to hide instead of destroy (unless quitting)
+  newWindow.on('close', (event) => {
+    if (!isQuitting) {
+      event.preventDefault();
+      newWindow.hide();
+      console.log(`Window ${newWindow.id} hidden instead of closed - systray remains`);
+    }
+  });
+
   // Clean up tracking when window closed
   newWindow.on('closed', () => {
     windowStates.delete(newWindow.id);
@@ -336,6 +345,14 @@ function createWindow() {
           }
         },
         { type: 'separator' },
+        {
+          label: 'Close Window (Escape)',
+          accelerator: 'Escape',
+          click: () => {
+            newWindow.hide();
+            console.log(`Window ${newWindow.id} hidden via menu`);
+          }
+        },
         {
           label: 'Close All Windows (Ctrl+Q)',
           accelerator: 'CmdOrCtrl+Q',
@@ -1129,21 +1146,33 @@ ipcMain.handle('create-new-window', async (event) => {
   }
 });
 
-// IPC handler for closing all windows
+// IPC handler for closing all windows and quitting app
 ipcMain.handle('close-all-windows', async (event) => {
   try {
-    console.log('Closing all windows...');
+    console.log('Closing all windows and quitting application...');
+    isQuitting = true;
+
     const allWindows = [...windows]; // Create a copy to avoid array modification issues
     let closedCount = 0;
-    
+
     allWindows.forEach(window => {
       if (window && !window.isDestroyed()) {
         window.close();
         closedCount++;
       }
     });
-    
-    console.log(`Closed ${closedCount} windows`);
+
+    // Destroy tray
+    if (tray) {
+      tray.destroy();
+      tray = null;
+      console.log('Tray destroyed');
+    }
+
+    // Quit the application
+    app.quit();
+
+    console.log(`Closed ${closedCount} windows and quitting`);
     return { success: true, closedCount: closedCount };
   } catch (error) {
     console.error('Failed to close all windows:', error);
@@ -1550,24 +1579,41 @@ ipcMain.handle('reset-content-scale', async (event) => {
   }
 });
 
+// IPC handler for hiding current window (Escape key)
+ipcMain.handle('hide-current-window', async (event) => {
+  try {
+    const senderWindow = BrowserWindow.fromWebContents(event.sender);
+    if (senderWindow && !senderWindow.isDestroyed()) {
+      senderWindow.hide();
+      console.log(`Window ${senderWindow.id} hidden (systray remains)`);
+      return { success: true };
+    } else {
+      return { success: false, error: 'Could not find sender window' };
+    }
+  } catch (error) {
+    console.error('Failed to hide window:', error);
+    return { success: false, error: error.message };
+  }
+});
+
 // IPC handler for minimizing to system tray (Ctrl+H)
 ipcMain.handle('minimize-to-tray', async (event) => {
   try {
     const allWindows = BrowserWindow.getAllWindows().filter(win => !win.selectionWindow);
-    
+
     if (allWindows.length > 0) {
       // Create tray if it doesn't exist
       if (!tray) {
         createTray();
       }
-      
+
       // Hide all windows
       allWindows.forEach(window => {
         if (!window.isDestroyed()) {
           window.hide();
         }
       });
-      
+
       console.log(`Minimized ${allWindows.length} windows to system tray`);
       return { success: true, windowCount: allWindows.length };
     } else {
