@@ -1691,30 +1691,21 @@ document.addEventListener('contextmenu', (event) => {
 document.addEventListener('keydown', async (event) => {
   debugLog(`*** KEYDOWN EVENT *** Key: ${event.key}, Ctrl: ${event.ctrlKey}, Alt: ${event.altKey}, Shift: ${event.shiftKey}`);
   
-  // Handle Ctrl+C (copy current view to clipboard)
+  // Handle Ctrl+C (copy current view to clipboard at full opacity)
   if (event.ctrlKey && event.key.toLowerCase() === 'c') {
     event.preventDefault();
     console.log('Ctrl+C detected, copying current window view to clipboard...');
-    
+
     try {
-      const content = document.querySelector('.content');
-      const originalOpacity = content.style.opacity;
-      content.style.opacity = '1';
-      
-      await new Promise(resolve => setTimeout(resolve, 50));
-      
       const success = await ipcRenderer.invoke('copy-to-clipboard');
-      content.style.opacity = originalOpacity;
-      
+
       if (success) {
-        console.log('Current window view successfully copied to clipboard!');
+        console.log('Current window view successfully copied to clipboard at full opacity!');
       } else {
         console.error('Failed to copy window view to clipboard');
       }
     } catch (error) {
       console.error('Error copying to clipboard:', error);
-      const content = document.querySelector('.content');
-      content.style.opacity = currentOpacity;
     }
   }
   

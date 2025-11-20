@@ -775,16 +775,29 @@ ipcMain.handle('copy-to-clipboard', async (event) => {
     if (!senderWindow) {
       throw new Error('Could not find sender window');
     }
-    
+
+    // Temporarily set content to full opacity for capture
+    const originalOpacity = await senderWindow.webContents.executeJavaScript(`
+      (() => {
+        const content = document.querySelector('.content');
+        const opacity = content.style.opacity;
+        content.style.opacity = '1';
+        return opacity;
+      })()
+    `);
+
+    // Wait for render to complete
+    await new Promise(resolve => setTimeout(resolve, 100));
+
     // Get current window bounds
     const bounds = senderWindow.getBounds();
-    
+
     // Get the current display to get scale factor
     const windowCenterX = bounds.x + bounds.width / 2;
     const windowCenterY = bounds.y + bounds.height / 2;
     const currentDisplay = screen.getDisplayNearestPoint({ x: windowCenterX, y: windowCenterY });
     const scaleFactor = currentDisplay.scaleFactor;
-    
+
     // Capture the entire window contents including border area
     // This ensures copy-paste cycles maintain exact window dimensions
     const captureArea = {
@@ -793,28 +806,36 @@ ipcMain.handle('copy-to-clipboard', async (event) => {
       width: bounds.width,
       height: bounds.height
     };
-    
+
     // Force exact pixel boundaries to prevent rounding accumulation
     captureArea.width = Math.floor(captureArea.width);
     captureArea.height = Math.floor(captureArea.height);
-    
+
     const image = await senderWindow.capturePage(captureArea);
     const imageSize = image.getSize();
-    
+
+    // Restore original opacity
+    await senderWindow.webContents.executeJavaScript(`
+      (() => {
+        const content = document.querySelector('.content');
+        content.style.opacity = '${originalOpacity}';
+      })()
+    `);
+
     // If there's a size mismatch due to DPI scaling, we need to be aware of it
     const expectedDeviceWidth = Math.round(captureArea.width * scaleFactor);
     const expectedDeviceHeight = Math.round(captureArea.height * scaleFactor);
-    
-    console.log(`Current window content copied to clipboard (including entire window area)`);
+
+    console.log(`Current window content copied to clipboard at full opacity (including entire window area)`);
     console.log(`Display scale factor: ${scaleFactor}`);
     console.log(`Logical capture area: ${captureArea.width}x${captureArea.height}px at (${captureArea.x}, ${captureArea.y})`);
     console.log(`Captured image size: ${imageSize.width}x${imageSize.height}px`);
     console.log(`Expected device size: ${expectedDeviceWidth}x${expectedDeviceHeight}px`);
     console.log(`Size match: ${imageSize.width === expectedDeviceWidth && imageSize.height === expectedDeviceHeight}`);
-    
+
     // Write to clipboard
     clipboard.writeImage(image);
-    
+
     return {
       success: true,
       scaleFactor: scaleFactor,
@@ -945,7 +966,7 @@ ipcMain.handle('save-image-file', async (event) => {
     if (!senderWindow) {
       throw new Error('Could not find sender window');
     }
-    
+
     const result = await dialog.showSaveDialog(senderWindow, {
       title: 'Save Image File',
       defaultPath: 'screenshot.png',
@@ -959,27 +980,48 @@ ipcMain.handle('save-image-file', async (event) => {
     if (!result.canceled && result.filePath) {
       const filePath = result.filePath;
       console.log(`Saving image to: ${filePath}`);
-      
+
+      // Temporarily set content to full opacity for capture
+      const originalOpacity = await senderWindow.webContents.executeJavaScript(`
+        (() => {
+          const content = document.querySelector('.content');
+          const opacity = content.style.opacity;
+          content.style.opacity = '1';
+          return opacity;
+        })()
+      `);
+
+      // Wait for render to complete
+      await new Promise(resolve => setTimeout(resolve, 100));
+
       // Get current window bounds for capturing
       const bounds = senderWindow.getBounds();
-      
+
       // Get the current display to get scale factor
       const windowCenterX = bounds.x + bounds.width / 2;
       const windowCenterY = bounds.y + bounds.height / 2;
       const currentDisplay = screen.getDisplayNearestPoint({ x: windowCenterX, y: windowCenterY });
       const scaleFactor = currentDisplay.scaleFactor;
-      
+
       // Capture the current window contents (full window for save)
       const image = await senderWindow.capturePage();
       const imageSize = image.getSize();
-      
+
+      // Restore original opacity
+      await senderWindow.webContents.executeJavaScript(`
+        (() => {
+          const content = document.querySelector('.content');
+          content.style.opacity = '${originalOpacity}';
+        })()
+      `);
+
       // Write to file
       const imageBuffer = image.toPNG();
       fs.writeFileSync(filePath, imageBuffer);
-      
-      console.log(`Image saved successfully: ${imageSize.width}x${imageSize.height}px`);
+
+      console.log(`Image saved successfully at full opacity: ${imageSize.width}x${imageSize.height}px`);
       console.log(`File: ${filePath}`);
-      
+
       return {
         success: true,
         filePath: filePath,
@@ -1315,7 +1357,7 @@ ipcMain.handle('save-image', async (event) => {
     // Show save dialog
     const result = await dialog.showSaveDialog(senderWindow, {
       title: 'Save Image',
-      defaultPath: 'screenshot.png',
+      defaultPath: 'screenclip.png',
       filters: [
         { name: 'PNG Images', extensions: ['png'] },
         { name: 'JPEG Images', extensions: ['jpg', 'jpeg'] },
@@ -1330,13 +1372,34 @@ ipcMain.handle('save-image', async (event) => {
     const filePath = result.filePath;
     console.log('Saving image to:', filePath);
 
-    // Capture the current window content
+    // Temporarily set content to full opacity for capture
+    const originalOpacity = await senderWindow.webContents.executeJavaScript(`
+      (() => {
+        const content = document.querySelector('.content');
+        const opacity = content.style.opacity;
+        content.style.opacity = '1';
+        return opacity;
+      })()
+    `);
+
+    // Wait for render to complete
+    await new Promise(resolve => setTimeout(resolve, 100));
+
+    // Capture the current window content at full opacity
     const screenshot = await senderWindow.capturePage();
     const buffer = screenshot.toPNG();
 
+    // Restore original opacity
+    await senderWindow.webContents.executeJavaScript(`
+      (() => {
+        const content = document.querySelector('.content');
+        content.style.opacity = '${originalOpacity}';
+      })()
+    `);
+
     // Save the file
     fs.writeFileSync(filePath, buffer);
-    console.log('Image saved successfully to:', filePath);
+    console.log('Image saved successfully at full opacity to:', filePath);
 
     return { success: true, filePath: filePath };
   } catch (error) {
