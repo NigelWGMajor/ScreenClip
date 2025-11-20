@@ -915,24 +915,40 @@ document.addEventListener('wheel', (event) => {
       console.error('Error scaling window:', error);
     }
   } else if (event.ctrlKey) {
-    // Ctrl+Wheel: Scale image content
+    // Ctrl+Wheel: Scale image content centered on window
     const content = document.querySelector('.content');
     if (!content || !originalImageWidth || !originalImageHeight) {
       console.log('No image content available for scaling');
       return;
     }
-    
+
     const delta = event.deltaY < 0 ? 1.1 : 0.9; // 10% increment/decrement
+    const previousScale = currentImageScale;
     currentImageScale *= delta;
     currentImageScale = Math.max(0.1, Math.min(10.0, currentImageScale)); // Limit scale range
-    
+
     const newWidth = Math.round(originalImageWidth * currentImageScale);
     const newHeight = Math.round(originalImageHeight * currentImageScale);
-    
+
+    // Get current window dimensions to calculate center point
+    const windowWidth = window.innerWidth;
+    const windowHeight = window.innerHeight;
+    const centerX = windowWidth / 2;
+    const centerY = windowHeight / 2;
+
+    // Calculate the change in scale
+    const scaleDelta = currentImageScale / previousScale;
+
+    // Adjust image position to keep the center point fixed
+    // Formula: newOffset = (oldOffset - centerPoint) * scaleDelta + centerPoint
+    imageOffset.x = (imageOffset.x - centerX) * scaleDelta + centerX;
+    imageOffset.y = (imageOffset.y - centerY) * scaleDelta + centerY;
+
     content.style.backgroundSize = `${newWidth}px ${newHeight}px`;
-    
-    console.log(`Image scaled to: ${(currentImageScale * 100).toFixed(1)}% (${newWidth}x${newHeight}px)`);
-    
+    content.style.backgroundPosition = `${imageOffset.x}px ${imageOffset.y}px`;
+
+    console.log(`Image scaled to: ${(currentImageScale * 100).toFixed(1)}% (${newWidth}x${newHeight}px) at position (${imageOffset.x.toFixed(1)}, ${imageOffset.y.toFixed(1)})`);
+
     updateCursor();
   } else if (event.shiftKey) {
     // Shift+Wheel: Scale window size
