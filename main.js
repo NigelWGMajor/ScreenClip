@@ -587,14 +587,18 @@ ipcMain.handle('capture-screenshot', async (event) => {
     });
     
     if (sources.length > 0) {
-      // Try to match the screen source to our current display
-      let screenSource = sources[0]; // Default fallback
+      // Prefer an exact display_id match to avoid picking the wrong screen on mixed-DPI setups
+      let screenSource = sources.find(source => source.display_id === currentDisplay.id.toString());
       
-      // If we have multiple sources, try to pick the right one
-      if (sources.length > 1 && currentDisplayIndex >= 0 && currentDisplayIndex < sources.length) {
+      if (screenSource) {
+        console.log(`Using screen source with display_id match: ${screenSource.display_id}`);
+      } else if (sources.length > 1 && currentDisplayIndex >= 0 && currentDisplayIndex < sources.length) {
+        // Fallback to index-based match if display_id lookup failed
         screenSource = sources[currentDisplayIndex];
-        console.log(`Using screen source ${currentDisplayIndex} for current display`);
+        console.log(`Display_id match not found; using screen source index ${currentDisplayIndex}`);
       } else {
+        // Final fallback to the first available source
+        screenSource = sources[0];
         console.log(`Using default screen source 0 (${sources.length} available, index was ${currentDisplayIndex})`);
       }
       
@@ -781,74 +785,86 @@ ipcMain.handle('copy-to-clipboard', async (event) => {
       throw new Error('Could not find sender window');
     }
 
-    // Temporarily set content to full opacity for capture
-    const originalOpacity = await senderWindow.webContents.executeJavaScript(`
+    // Temporarily set content to full opacity and hide red border for capture
+    const originalStyles = await senderWindow.webContents.executeJavaScript(`
       (() => {
+        const body = document.body;
         const content = document.querySelector('.content');
-        const opacity = content.style.opacity;
-        content.style.opacity = '1';
-        return opacity;
+        const opacity = content ? content.style.opacity : '';
+        const hadBorderHidden = body.classList.contains('border-hidden');
+        if (!hadBorderHidden) {
+          body.classList.add('border-hidden');
+        }
+        if (content) {
+          content.style.opacity = '1';
+        }
+        return { opacity, hadBorderHidden };
       })()
     `);
 
-    // Wait for render to complete
-    await new Promise(resolve => setTimeout(resolve, 100));
+    try {
+      // Wait for render to complete
+      await new Promise(resolve => setTimeout(resolve, 100));
 
-    // Get current window bounds
-    const bounds = senderWindow.getBounds();
+      // Get current window bounds
+      const bounds = senderWindow.getBounds();
 
-    // Get the current display to get scale factor
-    const windowCenterX = bounds.x + bounds.width / 2;
-    const windowCenterY = bounds.y + bounds.height / 2;
-    const currentDisplay = screen.getDisplayNearestPoint({ x: windowCenterX, y: windowCenterY });
-    const scaleFactor = currentDisplay.scaleFactor;
+      // Get the current display to get scale factor
+      const windowCenterX = bounds.x + bounds.width / 2;
+      const windowCenterY = bounds.y + bounds.height / 2;
+      const currentDisplay = screen.getDisplayNearestPoint({ x: windowCenterX, y: windowCenterY });
+      const scaleFactor = currentDisplay.scaleFactor;
 
-    // Capture the entire window contents including border area
-    // This ensures copy-paste cycles maintain exact window dimensions
-    const captureArea = {
-      x: 0,
-      y: 0,
-      width: bounds.width,
-      height: bounds.height
-    };
+      // Capture the entire window contents excluding the border (hidden via class)
+      const captureArea = {
+        x: 0,
+        y: 0,
+        width: bounds.width,
+        height: bounds.height
+      };
 
-    // Force exact pixel boundaries to prevent rounding accumulation
-    captureArea.width = Math.floor(captureArea.width);
-    captureArea.height = Math.floor(captureArea.height);
+      // Force exact pixel boundaries to prevent rounding accumulation
+      captureArea.width = Math.floor(captureArea.width);
+      captureArea.height = Math.floor(captureArea.height);
 
-    const image = await senderWindow.capturePage(captureArea);
-    const imageSize = image.getSize();
+      const image = await senderWindow.capturePage(captureArea);
+      const imageSize = image.getSize();
 
-    // Restore original opacity
-    await senderWindow.webContents.executeJavaScript(`
-      (() => {
-        const content = document.querySelector('.content');
-        content.style.opacity = '${originalOpacity}';
-      })()
-    `);
+      // If there's a size mismatch due to DPI scaling, we need to be aware of it
+      const expectedDeviceWidth = Math.round(captureArea.width * scaleFactor);
+      const expectedDeviceHeight = Math.round(captureArea.height * scaleFactor);
 
-    // If there's a size mismatch due to DPI scaling, we need to be aware of it
-    const expectedDeviceWidth = Math.round(captureArea.width * scaleFactor);
-    const expectedDeviceHeight = Math.round(captureArea.height * scaleFactor);
+      console.log(`Current window content copied to clipboard at full opacity (border hidden)`);
+      console.log(`Display scale factor: ${scaleFactor}`);
+      console.log(`Logical capture area: ${captureArea.width}x${captureArea.height}px at (${captureArea.x}, ${captureArea.y})`);
+      console.log(`Captured image size: ${imageSize.width}x${imageSize.height}px`);
+      console.log(`Expected device size: ${expectedDeviceWidth}x${expectedDeviceHeight}px`);
+      console.log(`Size match: ${imageSize.width === expectedDeviceWidth && imageSize.height === expectedDeviceHeight}`);
 
-    console.log(`Current window content copied to clipboard at full opacity (including entire window area)`);
-    console.log(`Display scale factor: ${scaleFactor}`);
-    console.log(`Logical capture area: ${captureArea.width}x${captureArea.height}px at (${captureArea.x}, ${captureArea.y})`);
-    console.log(`Captured image size: ${imageSize.width}x${imageSize.height}px`);
-    console.log(`Expected device size: ${expectedDeviceWidth}x${expectedDeviceHeight}px`);
-    console.log(`Size match: ${imageSize.width === expectedDeviceWidth && imageSize.height === expectedDeviceHeight}`);
+      // Write to clipboard
+      clipboard.writeImage(image);
 
-    // Write to clipboard
-    clipboard.writeImage(image);
-
-    return {
-      success: true,
-      scaleFactor: scaleFactor,
-      logicalWidth: captureArea.width,  // This is the entire window size (including border area)
-      logicalHeight: captureArea.height, // This is the entire window size (including border area)
-      capturedWidth: imageSize.width,
-      capturedHeight: imageSize.height
-    };
+      return {
+        success: true,
+        scaleFactor: scaleFactor,
+        logicalWidth: captureArea.width,  // This is the entire window size (border hidden)
+        logicalHeight: captureArea.height, // This is the entire window size (border hidden)
+        capturedWidth: imageSize.width,
+        capturedHeight: imageSize.height
+      };
+    } finally {
+      // Restore original opacity and border state
+      await senderWindow.webContents.executeJavaScript(`
+        (() => {
+          const body = document.body;
+          const content = document.querySelector('.content');
+          ${originalStyles.opacity !== undefined ? `if (content) content.style.opacity = ${JSON.stringify(originalStyles.opacity)};` : ''}
+          if (!${originalStyles.hadBorderHidden}) {
+            body.classList.remove('border-hidden');
+          }
+        })()
+      `);
+    }
   } catch (error) {
     console.error('Failed to copy to clipboard:', error);
     return { success: false };
@@ -986,54 +1002,67 @@ ipcMain.handle('save-image-file', async (event) => {
       const filePath = result.filePath;
       console.log(`Saving image to: ${filePath}`);
 
-      // Temporarily set content to full opacity for capture
-      const originalOpacity = await senderWindow.webContents.executeJavaScript(`
+      // Temporarily set content to full opacity and hide red border for capture
+      const originalStyles = await senderWindow.webContents.executeJavaScript(`
         (() => {
+          const body = document.body;
           const content = document.querySelector('.content');
-          const opacity = content.style.opacity;
-          content.style.opacity = '1';
-          return opacity;
+          const opacity = content ? content.style.opacity : '';
+          const hadBorderHidden = body.classList.contains('border-hidden');
+          if (!hadBorderHidden) {
+            body.classList.add('border-hidden');
+          }
+          if (content) {
+            content.style.opacity = '1';
+          }
+          return { opacity, hadBorderHidden };
         })()
       `);
 
-      // Wait for render to complete
-      await new Promise(resolve => setTimeout(resolve, 100));
+      try {
+        // Wait for render to complete
+        await new Promise(resolve => setTimeout(resolve, 100));
 
-      // Get current window bounds for capturing
-      const bounds = senderWindow.getBounds();
+        // Get current window bounds for capturing
+        const bounds = senderWindow.getBounds();
 
-      // Get the current display to get scale factor
-      const windowCenterX = bounds.x + bounds.width / 2;
-      const windowCenterY = bounds.y + bounds.height / 2;
-      const currentDisplay = screen.getDisplayNearestPoint({ x: windowCenterX, y: windowCenterY });
-      const scaleFactor = currentDisplay.scaleFactor;
+        // Get the current display to get scale factor
+        const windowCenterX = bounds.x + bounds.width / 2;
+        const windowCenterY = bounds.y + bounds.height / 2;
+        const currentDisplay = screen.getDisplayNearestPoint({ x: windowCenterX, y: windowCenterY });
+        const scaleFactor = currentDisplay.scaleFactor;
 
-      // Capture the current window contents (full window for save)
-      const image = await senderWindow.capturePage();
-      const imageSize = image.getSize();
+        // Capture the current window contents (full window for save) with border hidden
+        const image = await senderWindow.capturePage();
+        const imageSize = image.getSize();
 
-      // Restore original opacity
-      await senderWindow.webContents.executeJavaScript(`
-        (() => {
-          const content = document.querySelector('.content');
-          content.style.opacity = '${originalOpacity}';
-        })()
-      `);
+        // Write to file
+        const imageBuffer = image.toPNG();
+        fs.writeFileSync(filePath, imageBuffer);
 
-      // Write to file
-      const imageBuffer = image.toPNG();
-      fs.writeFileSync(filePath, imageBuffer);
+        console.log(`Image saved successfully at full opacity (border hidden): ${imageSize.width}x${imageSize.height}px`);
+        console.log(`File: ${filePath}`);
 
-      console.log(`Image saved successfully at full opacity: ${imageSize.width}x${imageSize.height}px`);
-      console.log(`File: ${filePath}`);
-
-      return {
-        success: true,
-        filePath: filePath,
-        fileName: path.basename(filePath),
-        imageWidth: imageSize.width,
-        imageHeight: imageSize.height
-      };
+        return {
+          success: true,
+          filePath: filePath,
+          fileName: path.basename(filePath),
+          imageWidth: imageSize.width,
+          imageHeight: imageSize.height
+        };
+      } finally {
+        // Restore original opacity and border state
+        await senderWindow.webContents.executeJavaScript(`
+          (() => {
+            const body = document.body;
+            const content = document.querySelector('.content');
+            ${originalStyles.opacity !== undefined ? `if (content) content.style.opacity = ${JSON.stringify(originalStyles.opacity)};` : ''}
+            if (!${originalStyles.hadBorderHidden}) {
+              body.classList.remove('border-hidden');
+            }
+          })()
+        `);
+      }
     } else {
       console.log('User cancelled save operation');
       return { success: false, cancelled: true };
@@ -2110,7 +2139,22 @@ async function processSelectionData(selectionData) {
     await new Promise(resolve => setTimeout(resolve, 100));
     
     // Calculate the crop area in the original screenshot coordinates
-    const scaleFactor = selectionData.scaleFactor;
+    // Derive the actual scale factor from the captured screenshot to handle mixed-DPI monitors
+    let scaleFactor = selectionData.scaleFactor;
+    try {
+      const screenshotImage = nativeImage.createFromDataURL(selectionData.screenshot);
+      const screenshotSize = screenshotImage.getSize();
+      const calculatedScale = screenshotSize.width / selectionData.displayBounds.width;
+      if (isFinite(calculatedScale) && calculatedScale > 0) {
+        console.log(`Calculated scale from screenshot: ${calculatedScale} (was ${scaleFactor})`);
+        scaleFactor = calculatedScale;
+      } else {
+        console.log(`Calculated scale from screenshot invalid (${calculatedScale}) - keeping provided ${scaleFactor}`);
+      }
+    } catch (error) {
+      console.error('Failed to calculate scale factor from screenshot, using provided value:', error);
+    }
+
     const cropX = Math.floor(selectionData.left * scaleFactor);
     const cropY = Math.floor(selectionData.top * scaleFactor);
     const cropWidth = Math.floor(selectionData.width * scaleFactor);
@@ -2223,7 +2267,22 @@ ipcMain.handle('process-screen-selection', async (event, selectionData) => {
 
     // Calculate the crop area in the original screenshot coordinates
     // Note: Clean screenshot without borders was already taken in captureScreenWithSelection()
-    const scaleFactor = selectionData.scaleFactor;
+    // Recompute scale factor from the screenshot itself to handle mixed-DPI displays reliably
+    let scaleFactor = selectionData.scaleFactor;
+    try {
+      const screenshotImage = nativeImage.createFromDataURL(selectionData.screenshot);
+      const screenshotSize = screenshotImage.getSize();
+      const calculatedScale = screenshotSize.width / selectionData.displayBounds.width;
+      if (isFinite(calculatedScale) && calculatedScale > 0) {
+        console.log(`Calculated scale from screenshot: ${calculatedScale} (was ${scaleFactor})`);
+        scaleFactor = calculatedScale;
+      } else {
+        console.log(`Calculated scale from screenshot invalid (${calculatedScale}) - keeping provided ${scaleFactor}`);
+      }
+    } catch (error) {
+      console.error('Failed to calculate scale factor from screenshot, using provided value:', error);
+    }
+
     const cropX = Math.floor(selectionData.left * scaleFactor);
     const cropY = Math.floor(selectionData.top * scaleFactor);
     const cropWidth = Math.floor(selectionData.width * scaleFactor);
