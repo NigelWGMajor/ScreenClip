@@ -1039,7 +1039,22 @@ document.addEventListener('dblclick', async (event) => {
     const cropInfo = await ipcRenderer.invoke('capture-screenshot');
 
     console.log('Received cropInfo:', cropInfo ? 'YES' : 'NO');
-    
+
+    // Validate cropInfo structure before proceeding
+    if (!cropInfo) {
+      console.error('Screenshot capture returned null - capture failed');
+      return;
+    }
+
+    if (!cropInfo.fullScreenshot || typeof cropInfo.fullScreenshot !== 'string' || cropInfo.fullScreenshot.length < 100) {
+      console.error('Screenshot capture returned invalid data:', {
+        hasFullScreenshot: !!cropInfo.fullScreenshot,
+        type: typeof cropInfo.fullScreenshot,
+        length: cropInfo.fullScreenshot ? cropInfo.fullScreenshot.length : 0
+      });
+      return;
+    }
+
     if (cropInfo && cropInfo.fullScreenshot) {
       console.log('Full screenshot data length:', cropInfo.fullScreenshot.length);
       console.log('Scale factor:', cropInfo.scaleFactor);
