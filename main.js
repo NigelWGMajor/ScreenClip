@@ -603,31 +603,47 @@ ipcMain.handle('capture-screenshot', async (event) => {
       }
       
       const fullScreenshot = screenSource.thumbnail;
-      
+
+      // Validate screenshot was captured
+      if (!fullScreenshot || fullScreenshot.isEmpty()) {
+        throw new Error('Screenshot thumbnail is empty or invalid');
+      }
+
       // Check what we actually got
       const screenshotSize = fullScreenshot.getSize();
       console.log(`Screenshot size: ${screenshotSize.width}x${screenshotSize.height}`);
       console.log(`Display logical size: ${displayBounds.width}x${displayBounds.height}`);
       console.log(`Expected physical size: ${displayBounds.width * scaleFactor}x${displayBounds.height * scaleFactor}`);
-      
+
+      // Validate screenshot dimensions are reasonable
+      if (screenshotSize.width < 100 || screenshotSize.height < 100) {
+        throw new Error(`Screenshot dimensions too small: ${screenshotSize.width}x${screenshotSize.height}`);
+      }
+
       // Calculate the ACTUAL scale factor from what we received vs what we expected
       const actualScaleX = screenshotSize.width / displayBounds.width;
       const actualScaleY = screenshotSize.height / displayBounds.height;
       
       // Use the calculated scale factor instead of the reported one
       const actualScale = actualScaleX; // They should be the same for square pixels
-      
+
       console.log(`Reported scale factor: ${scaleFactor}`);
       console.log(`Calculated scale: X=${actualScaleX}, Y=${actualScaleY}`);
       console.log(`Using calculated scale factor: ${actualScale}`);
-      
+
+      // Convert screenshot to data URL and validate
+      const screenshotDataURL = fullScreenshot.toDataURL();
+      if (!screenshotDataURL || screenshotDataURL.length < 100) {
+        throw new Error('Screenshot data URL generation failed or is too small');
+      }
+
       // Calculate window area using the ACTUAL scale factor from the screenshot
       const cropInfo = {
         windowX: Math.floor((windowBounds.x - displayBounds.x) * actualScale),
         windowY: Math.floor((windowBounds.y - displayBounds.y) * actualScale),
         windowWidth: Math.floor(windowBounds.width * actualScale),
         windowHeight: Math.floor(windowBounds.height * actualScale),
-        fullScreenshot: fullScreenshot.toDataURL(),
+        fullScreenshot: screenshotDataURL,
         scaleFactor: actualScale, // Use the calculated scale factor
         displayBounds: displayBounds,
         screenshotSize: screenshotSize,
@@ -646,10 +662,16 @@ ipcMain.handle('capture-screenshot', async (event) => {
     }
   } catch (error) {
     console.error('Screenshot capture failed:', error);
+    // Ensure window is shown even if capture fails
     if (senderWindow && !senderWindow.isDestroyed()) {
       senderWindow.show();
     }
-    return null;
+    // Return error object instead of null to provide more debugging info
+    return {
+      error: true,
+      message: error.message,
+      fullScreenshot: null
+    };
   }
 });
 
@@ -2253,8 +2275,26 @@ ipcMain.handle('process-screen-selection', async (event, selectionData) => {
       console.log('Using existing main window for first capture (windows.length=' + windows.length + ')');
     } else {
       // Create a new window for subsequent captures
+      // IMPORTANT: Position the window on the target display BEFORE showing it
+      // This ensures proper DPI scaling from the start
+      const targetDisplay = screen.getDisplayNearestPoint({
+        x: selectionData.displayBounds.x + selectionData.left,
+        y: selectionData.displayBounds.y + selectionData.top
+      });
+
       targetWindow = createWindow();
       console.log('Creating new window for subsequent capture (windows.length=' + windows.length + ')');
+
+      // Move window to target display IMMEDIATELY (before renderer loads)
+      // This ensures Electron applies correct DPI scaling
+      const preliminaryBounds = {
+        x: Math.round(selectionData.displayBounds.x + selectionData.left),
+        y: Math.round(selectionData.displayBounds.y + selectionData.top),
+        width: Math.round(selectionData.width),
+        height: Math.round(selectionData.height)
+      };
+      targetWindow.setBounds(preliminaryBounds);
+      console.log(`Positioned new window on target display (DPI=${targetDisplay.scaleFactor}) at (${preliminaryBounds.x}, ${preliminaryBounds.y})`);
 
       // Wait for the window to be ready
       await new Promise(resolve => {
