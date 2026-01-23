@@ -11,6 +11,8 @@ let mainWindow;
 let windows = []; // Array to track all windows
 let tray = null; // System tray instance
 let isQuitting = false; // Track if app is quitting to prevent tray restore
+let pendingAutoRestore = false; // Restore hidden window on next Win+Esc after auto-capture
+let lastAutoHiddenWindowId = null;
 
 // Track window position and dimensions to prevent drift
 // These are the single source of truth - never read back from system
@@ -1301,8 +1303,10 @@ ipcMain.handle('show-help-dialog', async (event) => {
 • Drag & Drop: Drop image files directly onto the window
 
 CONTROLS:
-• Ctrl + Double-Click: Snap a numbered series
-• Alt + Double-Click: Snap and clip
+• Ctrl + Double-Click: Snap a numbered series, then auto-hide (next Win+Esc restores)
+• Alt + Double-Click: Snap and clip, then auto-hide (next Win+Esc restores)
+• Tray Ctrl+Click: Capture and auto-save series (auto-hide)
+• Tray Alt+Double-Click: Capture and clip (auto-hide)
 • Mouse Wheel: Adjust window opacity (0-100%)
 • Ctrl + Mouse Wheel: Scale image content (10%-500%)
 • Shift + Mouse Wheel: Scale entire window (30%-500%)
@@ -1807,10 +1811,15 @@ ipcMain.handle('reset-content-scale', async (event) => {
 });
 
 // IPC handler for hiding current window (Escape key)
-ipcMain.handle('hide-current-window', async (event) => {
+ipcMain.handle('hide-current-window', async (event, options = {}) => {
   try {
     const senderWindow = BrowserWindow.fromWebContents(event.sender);
     if (senderWindow && !senderWindow.isDestroyed()) {
+      if (options.reason === 'auto-capture') {
+        markAutoRestore(senderWindow.id);
+      } else {
+        clearAutoRestore();
+      }
       senderWindow.hide();
       console.log(`Window ${senderWindow.id} hidden (systray remains)`);
       return { success: true };
@@ -1834,6 +1843,8 @@ ipcMain.handle('minimize-to-tray', async (event) => {
         createTray();
       }
 
+      clearAutoRestore();
+
       // Hide all windows
       allWindows.forEach(window => {
         if (!window.isDestroyed()) {
@@ -1852,6 +1863,117 @@ ipcMain.handle('minimize-to-tray', async (event) => {
     return { success: false, error: error.message };
   }
 });
+
+function getNormalWindows() {
+  return BrowserWindow.getAllWindows().filter(win => !win.selectionWindow && !win.isDestroyed());
+}
+
+function markAutoRestore(windowId) {
+  pendingAutoRestore = true;
+  lastAutoHiddenWindowId = windowId || null;
+}
+
+function clearAutoRestore() {
+  pendingAutoRestore = false;
+  lastAutoHiddenWindowId = null;
+}
+
+function getAutoRestoreWindow() {
+  if (lastAutoHiddenWindowId) {
+    const candidate = BrowserWindow.fromId(lastAutoHiddenWindowId);
+    if (candidate && !candidate.isDestroyed() && !candidate.selectionWindow && !candidate.isVisible()) {
+      return candidate;
+    }
+  }
+
+  const hiddenWindows = getNormalWindows().filter(win => !win.isVisible());
+  if (hiddenWindows.length > 0) {
+    return hiddenWindows[0];
+  }
+
+  return null;
+}
+
+function restoreAutoHiddenWindow() {
+  const targetWindow = getAutoRestoreWindow();
+  if (!targetWindow) {
+    return false;
+  }
+
+  if (targetWindow.isMinimized()) {
+    targetWindow.restore();
+  }
+
+  if (!targetWindow.isVisible()) {
+    targetWindow.show();
+  }
+
+  targetWindow.focus();
+  targetWindow.moveTop();
+
+  if (tray) {
+    tray.destroy();
+    tray = null;
+    console.log('Tray destroyed - window restored via Win+Esc');
+  }
+
+  clearAutoRestore();
+  return true;
+}
+
+function getPrimaryCaptureWindow() {
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    return mainWindow;
+  }
+
+  const normalWindows = getNormalWindows();
+  if (normalWindows.length > 0) {
+    return normalWindows[0];
+  }
+
+  return createWindow();
+}
+
+async function waitForWindowReady(targetWindow) {
+  if (!targetWindow || targetWindow.isDestroyed() || !targetWindow.webContents) {
+    return;
+  }
+
+  if (targetWindow.webContents.isLoading()) {
+    await new Promise(resolve => targetWindow.webContents.once('did-finish-load', resolve));
+  }
+}
+
+async function triggerTrayAutoCapture(options = {}) {
+  const targetWindow = getPrimaryCaptureWindow();
+  if (!targetWindow || targetWindow.isDestroyed()) {
+    return;
+  }
+
+  if (targetWindow.isMinimized()) {
+    targetWindow.restore();
+  }
+
+  if (!targetWindow.isVisible()) {
+    targetWindow.show();
+  }
+
+  targetWindow.focus();
+  targetWindow.moveTop();
+
+  await waitForWindowReady(targetWindow);
+  await new Promise(resolve => setTimeout(resolve, 100));
+
+  if (targetWindow.isDestroyed() || !targetWindow.webContents) {
+    return;
+  }
+
+  targetWindow.webContents.send('tray-auto-capture', {
+    ctrlKey: !!options.ctrlKey,
+    altKey: !!options.altKey,
+    hideAfter: true
+  });
+}
 
 // Create system tray
 function createTray() {
@@ -1884,6 +2006,8 @@ function createTray() {
             }
           });
           
+          clearAutoRestore();
+
           // Destroy tray since windows are now visible
           if (tray) {
             tray.destroy();
@@ -1912,8 +2036,26 @@ function createTray() {
   tray.setToolTip('ScreenClip - Press Win+Escape to capture screen');
   tray.setContextMenu(contextMenu);
   
+  tray.on('click', (event) => {
+    if (event && event.ctrlKey) {
+      triggerTrayAutoCapture({
+        ctrlKey: true
+      });
+    }
+  });
+
   // Double-click to restore all windows
-  tray.on('double-click', () => {
+  tray.on('double-click', (event) => {
+    if (event && event.altKey) {
+      triggerTrayAutoCapture({
+        altKey: true
+      });
+      return;
+    }
+    if (event && event.ctrlKey) {
+      return;
+    }
+
     const normalWindows = BrowserWindow.getAllWindows().filter(win => !win.selectionWindow);
     if (normalWindows.length > 0) {
       normalWindows.forEach(window => {
@@ -1921,7 +2063,9 @@ function createTray() {
           window.show();
         }
       });
-      
+
+      clearAutoRestore();
+
       // Destroy tray since windows are now visible
       if (tray) {
         tray.destroy();
@@ -1937,6 +2081,13 @@ function registerGlobalShortcuts() {
   // Register Win+Esc for global screen capture with selection
   const shortcutRegistered = globalShortcut.register('Super+Escape', () => {
     console.log('Global shortcut Win+Esc triggered');
+    if (pendingAutoRestore) {
+      const restored = restoreAutoHiddenWindow();
+      if (restored) {
+        return;
+      }
+      clearAutoRestore();
+    }
     captureScreenWithSelection();
   });
   
@@ -1956,6 +2107,7 @@ let lastShortcutTime = 0;
 // Capture screen where mouse cursor is located and show selection interface
 async function captureScreenWithSelection() {
   try {
+    clearAutoRestore();
     // Get cursor position to determine which screen to capture
     const cursorPosition = screen.getCursorScreenPoint();
     const currentDisplay = screen.getDisplayNearestPoint(cursorPosition);

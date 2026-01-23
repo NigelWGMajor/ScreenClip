@@ -24,13 +24,14 @@ ScreenClip is an advanced screen capture tool with professional annotation capab
 ## Key Features
 
 ### 🎯 Screen Capture
-- **Global Shortcut**: `Win+Esc` to capture any screen area
+- **Global Shortcut**: `Win+Esc` to capture any screen area (restores auto-hidden window after Ctrl/Alt capture)
 - **Multi-display Support**: Works across multiple monitors
 - **Precise Selection**: Drag to select exact screen regions
 - **Instant Activation**: Minimizes to system tray for quick access
 - **Left Double-Click**: Capture/retake screenshot
-- **Ctrl + Double-Click**: Capture and auto-save a numbered series (propts for initial filename)
-- **Alt + Double-Click**: Capture and auto-clip
+- **Ctrl + Double-Click**: Capture and auto-save a numbered series (prompts for initial filename), then auto-hide (next Win+Esc restores)
+- **Alt + Double-Click**: Capture and auto-clip, then auto-hide (next Win+Esc restores)
+- **System Tray**: `Ctrl+Click` auto-save series (auto-hide), `Alt+Double-Click` auto-clip (auto-hide)
 
 ### ✏️ Drawing & Annotation System
 - **Arrow Annotations**: Point to important elements with professional arrows
@@ -76,7 +77,8 @@ ScreenClip is an advanced screen capture tool with professional annotation capab
 - **Right-click + Drag**: Draw shapes (arrows, boxes, rounded boxes, fill rectangles)
 - **Left-click (Text Mode)**: Place text input
 - **Left Double-Click**: Capture/retake screenshot
-- **Ctrl + Left Double-Click**: Capture and auto-save a numbered series
+- **Ctrl + Double-Click**: Capture and auto-save a numbered series, then auto-hide (next Win+Esc restores window)
+- **Alt + Double-Click**: Capture and Auto-Click (next win-esc restores window)
 - **Mouse Wheel**: Adjust opacity
 - **Shift + Mouse Wheel**: Scale window frame
 - **Ctrl + Mouse Wheel**: Scale image content

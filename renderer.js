@@ -1029,14 +1029,26 @@ document.addEventListener('wheel', (event) => {
   }
 });
 
-// Double-click event to capture screenshot
-document.addEventListener('dblclick', async (event) => {
-  const isCtrlHeld = event.ctrlKey;
-  const isAltHeld = event.altKey;
+let isCaptureInProgress = false;
+
+async function captureScreenshotWithOptions(options = {}) {
+  if (isCaptureInProgress) {
+    console.log('Screenshot capture already in progress - ignoring request');
+    return;
+  }
+
+  isCaptureInProgress = true;
+
+  const isCtrlHeld = !!options.ctrlKey;
+  const isAltHeld = !!options.altKey;
+  const hideAfter = options.hideAfter !== undefined ? !!options.hideAfter : (isCtrlHeld || isAltHeld);
+  let captureSucceeded = false;
+
   const modifierLabel = isCtrlHeld && isAltHeld
     ? ' with Ctrl+Alt'
     : (isCtrlHeld ? ' with Ctrl' : (isAltHeld ? ' with Alt' : ''));
-  console.log(`Double-click detected${modifierLabel}, capturing screenshot...`);
+  const sourceLabel = options.source ? ` (${options.source})` : '';
+  console.log(`Capture request${sourceLabel}${modifierLabel}, capturing screenshot...`);
 
   try {
     // Request screenshot from main process
@@ -1137,9 +1149,11 @@ document.addEventListener('dblclick', async (event) => {
       // Update cursor now that we have image content
       updateCursor();
 
-      // If Ctrl was held during double-click, trigger auto-save series
+      captureSucceeded = true;
+
+      // If Ctrl was held during capture, trigger auto-save series
       if (isCtrlHeld) {
-        console.log('Ctrl+double-click detected - triggering auto-save series');
+        console.log('Ctrl capture detected - triggering auto-save series');
         try {
           const saveResult = await ipcRenderer.invoke('auto-save-screenshot');
           if (saveResult.success) {
@@ -1154,9 +1168,9 @@ document.addEventListener('dblclick', async (event) => {
         }
       }
 
-      // If Alt was held during double-click, copy the new screenshot to clipboard
+      // If Alt was held during capture, copy the new screenshot to clipboard
       if (isAltHeld) {
-        console.log('Alt+double-click detected - copying screenshot to clipboard');
+        console.log('Alt capture detected - copying screenshot to clipboard');
         try {
           const copyResult = await ipcRenderer.invoke('copy-to-clipboard');
           if (copyResult && copyResult.success) {
@@ -1174,7 +1188,35 @@ document.addEventListener('dblclick', async (event) => {
     }
   } catch (error) {
     console.error('Error during screenshot capture:', error);
+  } finally {
+    if (hideAfter && captureSucceeded) {
+      try {
+        await ipcRenderer.invoke('hide-current-window', { reason: 'auto-capture' });
+      } catch (error) {
+        console.error('Failed to auto-hide window after capture:', error);
+      }
+    }
+    isCaptureInProgress = false;
   }
+}
+
+// Double-click event to capture screenshot
+document.addEventListener('dblclick', (event) => {
+  captureScreenshotWithOptions({
+    ctrlKey: event.ctrlKey,
+    altKey: event.altKey,
+    hideAfter: event.ctrlKey || event.altKey,
+    source: 'double-click'
+  });
+});
+
+ipcRenderer.on('tray-auto-capture', (event, options = {}) => {
+  captureScreenshotWithOptions({
+    ctrlKey: options.ctrlKey,
+    altKey: options.altKey,
+    hideAfter: options.hideAfter,
+    source: 'tray'
+  });
 });
 
 // Window and image dragging functionality
@@ -2305,7 +2347,7 @@ document.addEventListener('keydown', async (event) => {
     else {
       console.log('Escape pressed - hiding window');
       try {
-        await ipcRenderer.invoke('hide-current-window');
+        await ipcRenderer.invoke('hide-current-window', { reason: 'escape' });
       } catch (error) {
         console.error('Error hiding window:', error);
       }
