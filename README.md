@@ -28,8 +28,8 @@ ScreenClip is an advanced screen capture tool with professional annotation capab
 - **Multi-display Support**: Works across multiple monitors
 - **Precise Selection**: Drag to select exact screen regions
 - **Instant Activation**: Minimizes to system tray for quick access
-- **Double-click**: retake snap
-- **Double-click with ctrl**: save a numbered series
+- **Left Double-Click**: Capture/retake screenshot
+- **Ctrl + Left Double-Click**: Capture and auto-save a numbered series (propts for initial filename)
 
 ### ✏️ Drawing & Annotation System
 - **Arrow Annotations**: Point to important elements with professional arrows
@@ -74,6 +74,8 @@ ScreenClip is an advanced screen capture tool with professional annotation capab
 #### Drawing Operations
 - **Right-click + Drag**: Draw shapes (arrows, boxes, rounded boxes, fill rectangles)
 - **Left-click (Text Mode)**: Place text input
+- **Left Double-Click**: Capture/retake screenshot
+- **Ctrl + Left Double-Click**: Capture and auto-save a numbered series
 - **Mouse Wheel**: Adjust opacity
 - **Shift + Mouse Wheel**: Scale window frame
 - **Ctrl + Mouse Wheel**: Scale image content

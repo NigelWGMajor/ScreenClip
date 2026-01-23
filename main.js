@@ -1301,6 +1301,7 @@ ipcMain.handle('show-help-dialog', async (event) => {
 • Drag & Drop: Drop image files directly onto the window
 
 CONTROLS:
+• Ctrl + Double-Click: Snap a numbered series
 • Mouse Wheel: Adjust window opacity (0-100%)
 • Ctrl + Mouse Wheel: Scale image content (10%-500%)
 • Shift + Mouse Wheel: Scale entire window (30%-500%)
@@ -1310,7 +1311,8 @@ CONTROLS:
 • Middle Click + Drag: Pan/move image within window (deprecated - use Ctrl+Drag)
 • Right Click: Open context menu with all features
 • Right Double-Click: Create new window
-• Left Double-Click: Capture screenshot
+• Left Double-Click: Capture/retake screenshot
+• Ctrl + Left Double-Click: Capture and auto-save a numbered series
 • Ctrl+C: Copy current view to clipboard
 • Ctrl+V: Paste image from clipboard
 • Ctrl+T: Extract text from image (OCR) and copy to clipboard
