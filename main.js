@@ -1302,6 +1302,7 @@ ipcMain.handle('show-help-dialog', async (event) => {
 
 CONTROLS:
 • Ctrl + Double-Click: Snap a numbered series
+• Alt + Double-Click: Snap and clip
 • Mouse Wheel: Adjust window opacity (0-100%)
 • Ctrl + Mouse Wheel: Scale image content (10%-500%)
 • Shift + Mouse Wheel: Scale entire window (30%-500%)

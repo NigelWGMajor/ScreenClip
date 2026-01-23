@@ -1032,7 +1032,11 @@ document.addEventListener('wheel', (event) => {
 // Double-click event to capture screenshot
 document.addEventListener('dblclick', async (event) => {
   const isCtrlHeld = event.ctrlKey;
-  console.log(`Double-click detected${isCtrlHeld ? ' with Ctrl' : ''}, capturing screenshot...`);
+  const isAltHeld = event.altKey;
+  const modifierLabel = isCtrlHeld && isAltHeld
+    ? ' with Ctrl+Alt'
+    : (isCtrlHeld ? ' with Ctrl' : (isAltHeld ? ' with Alt' : ''));
+  console.log(`Double-click detected${modifierLabel}, capturing screenshot...`);
 
   try {
     // Request screenshot from main process
@@ -1147,6 +1151,21 @@ document.addEventListener('dblclick', async (event) => {
           }
         } catch (error) {
           console.error('Error during auto-save:', error);
+        }
+      }
+
+      // If Alt was held during double-click, copy the new screenshot to clipboard
+      if (isAltHeld) {
+        console.log('Alt+double-click detected - copying screenshot to clipboard');
+        try {
+          const copyResult = await ipcRenderer.invoke('copy-to-clipboard');
+          if (copyResult && copyResult.success) {
+            console.log('Screenshot copied to clipboard');
+          } else {
+            console.error('Failed to copy screenshot to clipboard', copyResult);
+          }
+        } catch (error) {
+          console.error('Error copying screenshot to clipboard:', error);
         }
       }
 
