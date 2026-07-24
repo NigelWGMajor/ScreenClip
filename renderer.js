@@ -322,8 +322,9 @@ ipcRenderer.on('menu-copy', async () => {
   document.dispatchEvent(event);
 });
 
-// Menu-triggered load file event
-ipcRenderer.on('menu-load-file', async () => {
+// Load an image into the current window. Both the context menu and Ctrl+F use
+// this path so file data is always rendered after the dialog closes.
+async function loadImageFromFile() {
   console.log('Menu load file event received in renderer');
   
   try {
@@ -419,7 +420,9 @@ ipcRenderer.on('menu-load-file', async () => {
   } catch (error) {
     console.error('Error loading image file:', error);
   }
-});
+}
+
+ipcRenderer.on('menu-load-file', loadImageFromFile);
 
 // Menu-triggered save file event
 ipcRenderer.on('menu-save-file', async () => {
@@ -1984,7 +1987,7 @@ document.addEventListener('keydown', async (event) => {
     event.preventDefault();
     console.log('Ctrl+F detected, opening file...');
     try {
-      await ipcRenderer.invoke('open-image-file');
+      await loadImageFromFile();
       console.log('File open completed');
     } catch (error) {
       console.error('Error opening file:', error);

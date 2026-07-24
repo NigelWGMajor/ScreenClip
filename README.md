@@ -27,7 +27,7 @@ ScreenClip is an advanced screen capture tool with professional annotation capab
 - **Global Shortcut**: `Win+Esc` to capture any screen area (restores auto-hidden window after Ctrl/Alt capture)
 - **Multi-display Support**: Works across multiple monitors
 - **Precise Selection**: Drag to select exact screen regions
-- **Instant Activation**: Minimizes to system tray for quick access
+- **Instant Activation**: Opens screen selection on launch and remains available from the system tray
 - **Left Double-Click**: Capture/retake screenshot
 - **Ctrl + Double-Click**: Capture and auto-save a numbered series (prompts for initial filename), then auto-hide (next Win+Esc restores)
 - **Alt + Double-Click**: Capture and auto-clip, then auto-hide (next Win+Esc restores)
@@ -154,8 +154,8 @@ ScreenClip is an advanced screen capture tool with professional annotation capab
 
 ### Quick Demo Test Sequence
 1. **Start**: `npm install` → `npm start`
-2. **App minimizes to system tray**
-3. **Capture**: `Win+Esc` → drag selection area
+2. **App opens the screen selection window**
+3. **Capture**: Drag a selection area (`Win+Esc` starts another capture later)
 4. **Annotate**: 
    - Press `T` → click → type text → `Enter`
    - Press `S` → right-click drag → draw sharp box

@@ -2149,10 +2149,33 @@ async function captureScreenWithSelection() {
       }
     });
 
-    // Find the source that matches our display
-    const screenSource = sources.find(source => {
-      return source.display_id === currentDisplay.id.toString();
+    if (sources.length === 0) {
+      throw new Error('Electron did not return any screen capture sources');
+    }
+
+    // Windows can expose the same display ID as signed in screen.Display and
+    // unsigned in desktopCapturer.Source. Compare both representations.
+    const currentDisplayId = currentDisplay.id.toString();
+    const currentDisplayUnsignedId = (Number(currentDisplay.id) >>> 0).toString();
+    let screenSource = sources.find(source => {
+      const sourceDisplayId = String(source.display_id);
+      const sourceUnsignedId = (Number(source.display_id) >>> 0).toString();
+      return sourceDisplayId === currentDisplayId ||
+             sourceDisplayId === currentDisplayUnsignedId ||
+             sourceUnsignedId === currentDisplayUnsignedId;
     });
+
+    // Some Windows configurations return an empty display_id. Fall back to
+    // the matching display index so selection still opens.
+    if (!screenSource) {
+      const displays = screen.getAllDisplays();
+      const displayIndex = displays.findIndex(display => display.id === currentDisplay.id);
+      screenSource = sources[displayIndex] || sources[0];
+      console.warn(
+        `No exact desktop source for display ${currentDisplay.id}; ` +
+        `using source "${screenSource.name}" (${screenSource.display_id || 'no display ID'})`
+      );
+    }
 
     if (screenSource) {
       const screenshot = screenSource.thumbnail.toDataURL();
@@ -2174,7 +2197,7 @@ async function captureScreenWithSelection() {
       console.log('Borders restored - user can now see them while dragging selection');
 
       // NOW create the selection window AFTER clean screenshot is taken
-      let selectionWindow = createSelectionWindow(currentDisplay);
+      const selectionWindow = await createSelectionWindow(currentDisplay);
 
       // Note: Escape is now handled locally in selection.js to avoid global shortcut conflicts
 
@@ -2184,6 +2207,12 @@ async function captureScreenWithSelection() {
         displayBounds: currentDisplay.bounds,
         scaleFactor: currentDisplay.scaleFactor
       });
+
+      selectionWindow.show();
+      selectionWindow.focus();
+      selectionWindow.setAlwaysOnTop(true, 'screen-saver');
+      selectionWindow.moveTop();
+      console.log('Selection window shown and focused');
 
       // Ensure proper focus and always-on-top after screenshot is sent
       setTimeout(() => {
@@ -2215,7 +2244,7 @@ async function captureScreenWithSelection() {
 }
 
 // Create a fullscreen selection window
-function createSelectionWindow(display) {
+async function createSelectionWindow(display) {
   // Check if we already have a selection window and destroy it
   let existingWindow = BrowserWindow.getAllWindows().find(win => win.selectionWindow === true);
 
@@ -2238,9 +2267,10 @@ function createSelectionWindow(display) {
     y: display.bounds.y,
     width: display.bounds.width,
     height: display.bounds.height,
-    fullscreen: true,
+    fullscreen: false,
     frame: false,
     transparent: true,
+    show: false,
     alwaysOnTop: true,
     skipTaskbar: true,
     closable: true,
@@ -2259,26 +2289,22 @@ function createSelectionWindow(display) {
   
   // Load the selection interface
   console.log('Loading selection.html into window...');
-  selectionWindow.loadFile('selection.html').then(() => {
+  try {
+    await selectionWindow.loadFile('selection.html');
     console.log('selection.html loaded successfully');
-  }).catch(err => {
+  } catch (err) {
     console.error('Error loading selection.html:', err);
-  });
+    if (!selectionWindow.isDestroyed()) {
+      selectionWindow.destroy();
+    }
+    throw err;
+  }
 
   // Listen for renderer console messages
   selectionWindow.webContents.on('console-message', (event, level, message) => {
     console.log(`[SELECTION RENDERER] ${message}`);
   });
 
-  // Ensure the window can receive keyboard events
-  selectionWindow.once('ready-to-show', () => {
-    selectionWindow.show();
-    selectionWindow.focus();
-    selectionWindow.setAlwaysOnTop(true, 'screen-saver');
-    selectionWindow.moveTop();
-    console.log('Selection window focused for keyboard input');
-  });
-  
   // Window close event for cleanup (shortcuts now handled locally in selection.js)
   selectionWindow.on('closed', () => {
     console.log(`Selection window ${selectionWindow.id} closed`);
@@ -2620,17 +2646,18 @@ ipcMain.handle('show-selection-context-menu', async (event, data) => {
 });
 
 app.on('ready', () => {
-  const mainWindow = createWindow();
+  mainWindow = createWindow();
   registerGlobalShortcuts();
-  
-  // Auto-minimize to tray on launch
-  mainWindow.once('ready-to-show', () => {
+
+  // Keep the editor available in the tray and immediately start a selection.
+  mainWindow.once('ready-to-show', async () => {
     // Create tray immediately
     createTray();
-    
-    // Hide the window instead of showing it
+
+    // Hide the empty editor before capturing the desktop.
     mainWindow.hide();
-    console.log('Application launched and minimized to system tray');
+    console.log('Application launched; opening screen selection');
+    await captureScreenWithSelection();
   });
 });
 
